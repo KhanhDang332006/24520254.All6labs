@@ -30,12 +30,7 @@ if os.name == 'nt':
     lib_path = path_1 if os.path.exists(path_1) else path_2
 
     # 2. Lưới dự phòng (Fallback): Quét biến PATH và add_dll_directory để hốt file libwinpthread-1.dll bị sót
-    paths_to_add = [
-        r"C:\msys64\mingw64\bin",
-        r"D:\Tai_lieu\UIT_Document\HK2_2025_2026\NT219_MatMaHoc\Labs\CryptoLib",
-        r"D:\Tai_lieu\UIT_Document\HK2_2025_2026\NT219_MatMaHoc\Labs\CryptoLib\lib",
-        r"D:\Tai_lieu\UIT_Document\HK2_2025_2026\NT219_MatMaHoc\Labs\CryptoLib\bin"
-    ]
+    paths_to_add = []
     # Lấy toàn bộ biến môi trường PATH của hệ thống
     paths_to_add.extend(os.environ.get("PATH", "").split(os.pathsep))
     

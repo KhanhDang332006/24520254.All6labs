@@ -1,0 +1,17 @@
+# Bỏ qua thư mục build của CMake
+build/
+CMakeCache.txt
+CMakeFiles/
+
+# Bỏ qua cấu hình cá nhân của VS Code (nếu muốn)
+.vscode/
+
+# Bỏ qua rác của thư viện Python (dành cho phần GUI sau này)
+__pycache__/
+*.pyc
+env/
+venv/
+
+# Bỏ qua các file rác của hệ điều hành
+.DS_Store
+Thumbs.db

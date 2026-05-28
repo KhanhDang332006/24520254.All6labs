@@ -1,1 +1,5 @@
-This is a secret message for Lab 1
+Hello
+GCM
+and
+CCM
+Mode

@@ -9,6 +9,7 @@
 #include <cryptopp/files.h>
 #include <cryptopp/hex.h>
 #include <cryptopp/sha.h>
+#include<cryptopp/channels.h>
 
 #include <iostream>
 #include <fstream>
@@ -167,74 +168,111 @@ public:
         FileSource fs(in.c_str(), true, new StreamTransformationFilter(dec, new FileSink(out.c_str())));
     }
 
-    template<class AEAD_ENC>
-    static void EncryptAEAD(const std::string& in, const std::string& out, const SecByteBlock& key, const SecByteBlock& iv, const std::string& aad, std::string& outTagHex) {
-        AEAD_ENC enc;
-        enc.SetKeyWithIV(key, key.size(), iv, iv.size());
-        
-        // 1. Specify Data Lengths (Bắt buộc với CCM)
-        enc.SpecifyDataLengths(aad.size(), GetFileSize(in), 0);
+template<class AEAD_ENC>
+static void EncryptAEAD(
+    const std::string& in,
+    const std::string& out,
+    const SecByteBlock& key,
+    const SecByteBlock& iv,
+    const std::string& aad,
+    std::string& outTagHex)
+{
+    AEAD_ENC enc;
+    enc.SetKeyWithIV(key, key.size(), iv, iv.size());
 
-        const int TAG_SIZE = 16;
-        // 2. putMessage=false: GIỮ lại MAC bên trong filter để lưu riêng ra file JSON.
-        // Điều này giúp tránh lỗi "multiple channels" của FileSink và giữ cho file ciphertext sạch sẽ.
-        AuthenticatedEncryptionFilter ef(enc, new FileSink(out.c_str()), false, TAG_SIZE);
+    enc.SpecifyDataLengths(aad.size(), GetFileSize(in), 0);
 
-        // Nạp AAD
-        if (!aad.empty()) {
-            ef.ChannelPut(AAD_CHANNEL, reinterpret_cast<const byte*>(aad.data()), aad.size());
-            ef.ChannelMessageEnd(AAD_CHANNEL);
-        }
+    const int TAG_SIZE = 16;
+    SecByteBlock tag(TAG_SIZE);
 
-        // 3. Nạp Plaintext qua FileSource
-        FileSource fs(in.c_str(), true, new Redirector(ef));
+    // 1. Khai báo các Sink trên Stack (cực kỳ an toàn, tự động dọn rác khi hàm kết thúc)
+    FileSink fileSink(out.c_str());
+    ArraySink macSink(tag, tag.size());
 
-        // 4. Trích xuất MAC lưu ra biến để viết vào JSON
-        SecByteBlock tag(TAG_SIZE);
-        ef.Get(tag, tag.size());
-        outTagHex = EncodeHex(tag.data(), tag.size());
+    // 2. ChannelSwitch nhận tham chiếu (&) của luồng mặc định
+    ChannelSwitch cs(fileSink);
+    
+    // 3. Định tuyến luồng MAC vào macSink
+    cs.AddRoute("MAC_CHANNEL", macSink, DEFAULT_CHANNEL);
+
+    // 4. Khởi tạo Filter trên Heap để FileSource tự động quản lý.
+    // Dùng Redirector(cs) để làm cầu nối trung gian trỏ vào biến cs trên stack.
+    AuthenticatedEncryptionFilter* ef = new AuthenticatedEncryptionFilter(
+        enc,
+        new Redirector(cs),
+        false,        // putAAD = false
+        TAG_SIZE,
+        "MAC_CHANNEL" // Chỉ định MAC đi vào luồng MAC_CHANNEL
+    );
+
+    // Nạp AAD
+    if (!aad.empty()) {
+        ef->ChannelPut(AAD_CHANNEL, reinterpret_cast<const byte*>(aad.data()), aad.size());
+        ef->ChannelMessageEnd(AAD_CHANNEL);
     }
 
-    template<class AEAD_DEC>
-    static void DecryptAEAD(const std::string& in, const std::string& out, const SecByteBlock& key, const SecByteBlock& iv, const std::string& aad, const std::string& expectedTagHex) {
-        AEAD_DEC dec;
-        dec.SetKeyWithIV(key, key.size(), iv, iv.size());
-        
-        // Vì MAC được lưu riêng trong file JSON, nên dung lượng file `in` chính là dung lượng thực sự của ciphertext.
-        dec.SpecifyDataLengths(aad.size(), GetFileSize(in), 0);
+    // Bơm Plaintext (FileSource sẽ tự động delete ef khi xử lý xong)
+    FileSource fs(in.c_str(), true, ef);
 
-        const int TAG_SIZE = 16;
-        SecByteBlock tag;
-        DecodeHex(expectedTagHex, tag);
+    // Lúc này macSink đã hứng trọn vẹn 16 bytes MAC thật
+    outTagHex = EncodeHex(tag.data(), tag.size());
+}
 
-        // MAC_AT_BEGIN yêu cầu ta phải bơm MAC vào trước khi bơm dữ liệu Ciphertext
-        AuthenticatedDecryptionFilter df(dec, new FileSink(out.c_str()), 
-            AuthenticatedDecryptionFilter::MAC_AT_BEGIN | AuthenticatedDecryptionFilter::THROW_EXCEPTION, TAG_SIZE);
+template<class AEAD_DEC>
+static void DecryptAEAD(
+    const std::string& in,
+    const std::string& out,
+    const SecByteBlock& key,
+    const SecByteBlock& iv,
+    const std::string& aad,
+    const std::string& expectedTagHex)
+{
+    AEAD_DEC dec;
+    dec.SetKeyWithIV(key, key.size(), iv, iv.size());
 
-        // Nạp AAD
-        if (!aad.empty()) {
-            df.ChannelPut(AAD_CHANNEL, reinterpret_cast<const byte*>(aad.data()), aad.size());
-            df.ChannelMessageEnd(AAD_CHANNEL);
-        }
+    dec.SpecifyDataLengths(aad.size(), GetFileSize(in), 0);
 
-        // Bơm MAC vào filter
-        df.Put(tag, tag.size());
+    const int TAG_SIZE = 16;
+    SecByteBlock tag;
+    DecodeHex(expectedTagHex, tag);
 
-        // CHÚ Ý QUAN TRỌNG:
-        // Không dùng FileSource(..., true) ở đây vì lệnh bơm tự động của nó sẽ phát tín hiệu MessageBegin() 
-        // làm Reset (xóa) mất cái MAC mà ta vừa Put ở trên. 
-        // Thay vào đó, tự đọc file và bơm thủ công để bypass quá trình reset đó.
-        std::ifstream infile(in, std::ios::binary);
-        if (!infile) throw std::runtime_error("Cannot open input file: " + in);
-        byte buffer[4096];
-        while(infile.good()) {
-            infile.read(reinterpret_cast<char*>(buffer), sizeof(buffer));
-            if (infile.gcount() > 0) {
-                df.Put(buffer, infile.gcount());
-            }
-        }
-        df.MessageEnd(); // Gọi hàm kích hoạt check MAC. Nếu hỏng, Exception văng ở dòng này.
+    // Dùng MAC_AT_END chuẩn theo behavior của GCM
+    AuthenticatedDecryptionFilter df(
+        dec,
+        new FileSink(out.c_str()),
+        AuthenticatedDecryptionFilter::MAC_AT_END |
+        AuthenticatedDecryptionFilter::THROW_EXCEPTION,
+        TAG_SIZE
+    );
+
+    // 1. Nạp AAD
+    if (!aad.empty()) {
+        df.ChannelPut(AAD_CHANNEL, reinterpret_cast<const byte*>(aad.data()), aad.size());
+        df.ChannelMessageEnd(AAD_CHANNEL);
     }
+
+    // 2. Bơm Ciphertext trước (bơm từng chunk nhỏ, tốn đúng 4KB RAM)
+    std::ifstream infile(in, std::ios::binary);
+    if (!infile) {
+        throw std::runtime_error("Cannot open input ciphertext file.");
+    }
+
+    byte buffer[4096];
+    while (infile.good()) {
+        infile.read(reinterpret_cast<char*>(buffer), sizeof(buffer));
+        std::streamsize bytesRead = infile.gcount();
+        if (bytesRead > 0) {
+            // Nạp Ciphertext vào luồng mặc định
+            df.ChannelPut(DEFAULT_CHANNEL, buffer, bytesRead);
+        }
+    }
+
+    // 3. Bơm MAC vào SAU CÙNG (Nối đuôi Ciphertext)
+    df.ChannelPut(DEFAULT_CHANNEL, tag.data(), tag.size());
+
+    // 4. Chốt hạ luồng, Verify!
+    df.ChannelMessageEnd(DEFAULT_CHANNEL);
+}
 
     static void ProcessEncryption(const std::string& mode, const std::string& keyHex, const std::string& in, const std::string& out, bool allowEcb, std::string explicitIvHex = "", std::string aadStr = "") {
         SecByteBlock key, iv;

@@ -30,7 +30,7 @@ else()
 endif()
 
 # 2. Add subdirectories cho cac Lab (comment nhung lab chua lam)
-# add_subdirectory(src/lab1_sym)
+ add_subdirectory(src/lab1_sym_with_cryptopp)
 # add_subdirectory(src/lab2_aes)
 add_subdirectory(src/lab3_rsa_hybrid)
 # add_subdirectory(src/lab4_hash)

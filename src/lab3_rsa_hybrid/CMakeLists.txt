@@ -1,9 +1,12 @@
+# Khai báo file nguồn và file Header
+set(LAB3_SOURCES rsatool.cpp)
+set(LAB3_HEADERS json.hpp) # Khai báo để VS Code và CMake nhận diện
+
 # Build thu vien dong (.dll hoac .so) de Python GUI su dung
-add_library(lab3_dll SHARED rsatool.cpp)
+add_library(lab3_dll SHARED ${LAB3_SOURCES} ${LAB3_HEADERS})
 target_link_libraries(lab3_dll PRIVATE crypto_core)
-# Define macro de export API tren Windows (khop voi code C++ cua ban)
 target_compile_definitions(lab3_dll PRIVATE RSATOOL_BUILD_DLL)
 
-# (Tuy chon) Build file thuc thi CLI de test rieng
-add_executable(lab3_cli rsatool.cpp)
+# Build file thuc thi CLI de test rieng
+add_executable(lab3_cli ${LAB3_SOURCES} ${LAB3_HEADERS})
 target_link_libraries(lab3_cli PRIVATE crypto_core)

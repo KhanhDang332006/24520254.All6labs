@@ -9,7 +9,7 @@
 #include <cryptopp/files.h>
 #include <cryptopp/hex.h>
 #include <cryptopp/sha.h>
-#include<cryptopp/channels.h>
+#include <cryptopp/channels.h>
 
 #include <iostream>
 #include <fstream>
@@ -20,6 +20,7 @@
 #include <map>
 #include <set>
 #include <cctype>
+#include <algorithm> // [THÊM] Cần cho std::transform trong KAT_Runner
 
 using namespace CryptoPP;
 namespace fs = std::filesystem;
@@ -132,6 +133,193 @@ struct NonceTracker {
 
         std::ofstream out(dbPath, std::ios::app);
         out << record << "\n";
+    }
+};
+
+// =========================================================
+// [THÊM VÀO] CUSTOM MINI JSON PARSER & KAT RUNNER ENGINE
+// Đảm bảo không dùng thư viện ngoài
+// =========================================================
+class KAT_Runner {
+public:
+    static void Run(const std::string& filepath) {
+        std::vector<std::map<std::string, std::string>> kats;
+        
+        try {
+            kats = ParseSimpleJsonArray(filepath);
+        } catch (const std::exception& e) {
+            std::cerr << "[!] JSON Error: Không thể đọc file vectors: " << e.what() << "\n";
+            return;
+        }
+
+        int passed = 0, failed = 0, total = kats.size();
+        std::cout << "=================================================\n";
+        std::cout << "  RUNNING KNOWN ANSWER TESTS (NIST KATs)\n";
+        std::cout << "=================================================\n";
+
+        for (const auto& tc : kats) {
+            std::string name = GetVal(tc, "test_name", "Unknown Test");
+            bool result = false;
+            try {
+                result = TestSingle(tc);
+            } catch (const Exception& e) { // Crypto++ Exception
+                result = false;
+            } catch (const std::exception& e) {
+                result = false;
+            }
+
+            if (result) {
+                std::cout << "[PASS] " << name << "\n";
+                passed++;
+            } else {
+                std::cout << "[FAIL] " << name << "\n";
+                failed++;
+            }
+        }
+        std::cout << "-------------------------------------------------\n";
+        std::cout << "Summary: Total: " << total << " | Passed: " << passed << " | Failed: " << failed << "\n";
+        if (failed == 0 && total > 0) {
+            std::cout << ">>> ALL KATs PASSED SUCCESSFULY. <<<\n";
+        }
+        std::cout << "=================================================\n";
+    }
+
+private:
+    static std::vector<std::map<std::string, std::string>> ParseSimpleJsonArray(const std::string& filepath) {
+        std::vector<std::map<std::string, std::string>> array;
+        std::ifstream file(filepath);
+        if (!file.is_open()) throw std::runtime_error("Cannot open file");
+
+        std::string line;
+        std::map<std::string, std::string> currentObj;
+        bool inObject = false;
+
+        while (std::getline(file, line)) {
+            size_t start = line.find_first_not_of(" \t\r\n");
+            if (start == std::string::npos) continue;
+
+            if (line[start] == '{') {
+                inObject = true;
+                currentObj.clear();
+            } else if (line[start] == '}') {
+                if (inObject) {
+                    array.push_back(currentObj);
+                    inObject = false;
+                }
+            } else if (inObject) {
+                size_t keyStart = line.find('"');
+                if (keyStart == std::string::npos) continue;
+                size_t keyEnd = line.find('"', keyStart + 1);
+                if (keyEnd == std::string::npos) continue;
+
+                size_t colon = line.find(':', keyEnd + 1);
+                if (colon == std::string::npos) continue;
+
+                size_t valStart = line.find('"', colon + 1);
+                if (valStart == std::string::npos) continue;
+                size_t valEnd = line.find('"', valStart + 1);
+                if (valEnd == std::string::npos) continue;
+
+                std::string key = line.substr(keyStart + 1, keyEnd - keyStart - 1);
+                std::string val = line.substr(valStart + 1, valEnd - valStart - 1);
+                currentObj[key] = val;
+            }
+        }
+        return array;
+    }
+
+    static std::string GetVal(const std::map<std::string, std::string>& m, const std::string& key, const std::string& def = "") {
+        auto it = m.find(key);
+        return (it != m.end()) ? it->second : def;
+    }
+
+    static bool TestSingle(const std::map<std::string, std::string>& tc) {
+        std::string mode = GetVal(tc, "mode");
+        SecByteBlock key, iv;
+        DecodeHex(GetVal(tc, "key"), key);
+        DecodeHex(GetVal(tc, "iv"), iv);
+
+        SecByteBlock ptBlock, expectedCtBlock;
+        DecodeHex(GetVal(tc, "plaintext"), ptBlock);
+        DecodeHex(GetVal(tc, "ciphertext"), expectedCtBlock);
+
+        std::string pt((const char*)ptBlock.data(), ptBlock.size());
+        std::string expectedCt((const char*)expectedCtBlock.data(), expectedCtBlock.size());
+        std::string actualCt;
+
+        if (mode == "ecb" || mode == "cbc" || mode == "ofb" || mode == "cfb" || mode == "ctr" || mode == "xts") {
+            if (mode == "cbc") actualCt = EncryptMem<CBC_Mode<AES>::Encryption>(pt, key, iv);
+            else if (mode == "cfb") actualCt = EncryptMem<CFB_Mode<AES>::Encryption>(pt, key, iv);
+            else if (mode == "ofb") actualCt = EncryptMem<OFB_Mode<AES>::Encryption>(pt, key, iv);
+            else if (mode == "ctr") actualCt = EncryptMem<CTR_Mode<AES>::Encryption>(pt, key, iv);
+            else if (mode == "xts") actualCt = EncryptMem<XTS_Mode<AES>::Encryption>(pt, key, iv);
+            else if (mode == "ecb") actualCt = EncryptMem<ECB_Mode<AES>::Encryption>(pt, key, iv);
+            
+            return actualCt == expectedCt;
+        } 
+        else if (mode == "gcm" || mode == "ccm") {
+            SecByteBlock aadBlock;
+            DecodeHex(GetVal(tc, "aad"), aadBlock);
+            std::string aad((const char*)aadBlock.data(), aadBlock.size());
+            std::string expectedTagHex = GetVal(tc, "tag");
+            std::string actualTagHex;
+
+            if (mode == "gcm") {
+                actualCt = EncryptAEADMem<GCM<AES>::Encryption>(pt, key, iv, aad, actualTagHex);
+            } else if (mode == "ccm") {
+                actualCt = EncryptAEADMem<CCM<AES>::Encryption>(pt, key, iv, aad, actualTagHex);
+            }
+
+            std::transform(expectedTagHex.begin(), expectedTagHex.end(), expectedTagHex.begin(), ::toupper);
+            std::transform(actualTagHex.begin(), actualTagHex.end(), actualTagHex.begin(), ::toupper);
+
+            return (actualCt == expectedCt) && (actualTagHex == expectedTagHex);
+        }
+        return false;
+    }
+
+    template<class ENC_MODE>
+    static std::string EncryptMem(const std::string& pt, const SecByteBlock& key, const SecByteBlock& iv) {
+        ENC_MODE enc;
+        if (iv.size() > 0 && enc.IVRequirement() != SimpleKeyingInterface::NOT_RESYNCHRONIZABLE) {
+            enc.SetKeyWithIV(key, key.size(), iv, iv.size());
+        } else {
+            enc.SetKey(key, key.size());
+        }
+
+        std::string ct;
+        StringSource ss(pt, true, 
+            new StreamTransformationFilter(enc, 
+                new StringSink(ct), 
+                StreamTransformationFilter::NO_PADDING 
+            )
+        );
+        return ct;
+    }
+
+    template<class AEAD_ENC>
+    static std::string EncryptAEADMem(const std::string& pt, const SecByteBlock& key, const SecByteBlock& iv, const std::string& aad, std::string& outTagHex) {
+        AEAD_ENC enc;
+        enc.SetKeyWithIV(key, key.size(), iv, iv.size());
+        enc.SpecifyDataLengths(aad.size(), pt.size(), 0);
+
+        std::string ct;
+        const int TAG_SIZE = 16;
+        AuthenticatedEncryptionFilter ef(enc, new StringSink(ct), false, TAG_SIZE);
+
+        if (!aad.empty()) {
+            ef.ChannelPut(AAD_CHANNEL, (const byte*)aad.data(), aad.size());
+            ef.ChannelMessageEnd(AAD_CHANNEL);
+        }
+
+        ef.ChannelPut(DEFAULT_CHANNEL, (const byte*)pt.data(), pt.size());
+        ef.ChannelMessageEnd(DEFAULT_CHANNEL);
+
+        std::string final_ct = ct.substr(0, pt.size());
+        std::string final_tag = ct.substr(pt.size());
+
+        outTagHex = EncodeHex((const byte*)final_tag.data(), final_tag.size());
+        return final_ct;
     }
 };
 
@@ -382,7 +570,9 @@ void PrintUsage(const char* prog_path) {
     std::cout << "COMMANDS:\n";
     std::cout << "  keygen    Generate a secure random AES key and save it as Hex.\n";
     std::cout << "  encrypt   Encrypt a file using the specified AES mode.\n";
-    std::cout << "  decrypt   Decrypt a ciphertext file using the specified AES mode.\n\n";
+    std::cout << "  decrypt   Decrypt a ciphertext file using the specified AES mode.\n";
+    // [THÊM VÀO] Hướng dẫn hiển thị command KAT
+    std::cout << "  --kat     Run Known Answer Tests from a JSON file.\n\n";
     
     std::cout << "OPTIONS:\n";
     std::cout << "  --mode <mode>       AES mode (Required). Supported: ecb, cbc, ofb, cfb, ctr, xts, gcm, ccm.\n";
@@ -425,10 +615,26 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    // [THÊM VÀO] KAT Interceptor (Cắt ngang khi người dùng gõ --kat)
+    if (cmd == "--kat") {
+        if (argc < 3) {
+            std::cerr << "[!] Error: Missing path to vectors JSON file. Usage: aestool --kat vectors.json\n";
+            return 1;
+        }
+        try {
+            KAT_Runner::Run(argv[2]);
+        } catch(const std::exception& e) {
+            std::cerr << "[!] KAT Error: " << e.what() << "\n";
+            return 1;
+        }
+        return 0;
+    }
+
     std::map<std::string, std::string> args;
     std::set<std::string> passed_flags; 
     bool allowEcb = false;
 
+    // TỪ ĐÂY TRỞ XUỐNG: 100% CODE GỐC CỦA BẠN (KHÔNG SỬA MỘT CHỮ)
     for (int i = 2; i < argc; i++) {
         std::string arg = argv[i];
 

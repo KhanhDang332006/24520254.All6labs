@@ -1,0 +1,202 @@
+[
+  {
+    "test_name": "NIST 800-38A AES-128-ECB Block 1",
+    "mode": "ecb",
+    "key": "2b7e151628aed2a6abf7158809cf4f3c",
+    "iv": "",
+    "plaintext": "6bc1bee22e409f96e93d7e117393172a",
+    "ciphertext": "3ad77bb40d7a3660a89ecaf32466ef97",
+    "aad": "",
+    "tag": ""
+  },
+  {
+    "test_name": "NIST 800-38A AES-128-ECB Block 2",
+    "mode": "ecb",
+    "key": "2b7e151628aed2a6abf7158809cf4f3c",
+    "iv": "",
+    "plaintext": "ae2d8a571e03ac9c9eb76fac45af8e51",
+    "ciphertext": "f5d3d58503b9699de785895a96fdbaaf",
+    "aad": "",
+    "tag": ""
+  },
+  {
+    "test_name": "NIST 800-38A AES-192-ECB Block 1",
+    "mode": "ecb",
+    "key": "8e73b0f7da0e6452c810f32b809079e562f8ead2522c6b7b",
+    "iv": "",
+    "plaintext": "6bc1bee22e409f96e93d7e117393172a",
+    "ciphertext": "bd334f1d6e45f25ff712a214571fa5cc",
+    "aad": "",
+    "tag": ""
+  },
+  {
+    "test_name": "NIST 800-38A AES-256-ECB Block 1",
+    "mode": "ecb",
+    "key": "603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4",
+    "iv": "",
+    "plaintext": "6bc1bee22e409f96e93d7e117393172a",
+    "ciphertext": "f3eed1bdb5d2a03c064b5a7e3db181f8",
+    "aad": "",
+    "tag": ""
+  },
+  {
+    "test_name": "NIST 800-38A AES-128-CBC Block 1",
+    "mode": "cbc",
+    "key": "2b7e151628aed2a6abf7158809cf4f3c",
+    "iv": "000102030405060708090a0b0c0d0e0f",
+    "plaintext": "6bc1bee22e409f96e93d7e117393172a",
+    "ciphertext": "7649abac8119b246cee98e9b12e9197d",
+    "aad": "",
+    "tag": ""
+  },
+  {
+    "test_name": "NIST 800-38A AES-128-CBC Block 2",
+    "mode": "cbc",
+    "key": "2b7e151628aed2a6abf7158809cf4f3c",
+    "iv": "7649abac8119b246cee98e9b12e9197d",
+    "plaintext": "ae2d8a571e03ac9c9eb76fac45af8e51",
+    "ciphertext": "5086cb9b507219ee95db113a917678b2",
+    "aad": "",
+    "tag": ""
+  },
+  {
+    "test_name": "NIST 800-38A AES-128-CBC 2 Blocks Chained",
+    "mode": "cbc",
+    "key": "2b7e151628aed2a6abf7158809cf4f3c",
+    "iv": "000102030405060708090a0b0c0d0e0f",
+    "plaintext": "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e51",
+    "ciphertext": "7649abac8119b246cee98e9b12e9197d5086cb9b507219ee95db113a917678b2",
+    "aad": "",
+    "tag": ""
+  },
+  {
+    "test_name": "NIST 800-38A AES-192-CBC Block 1",
+    "mode": "cbc",
+    "key": "8e73b0f7da0e6452c810f32b809079e562f8ead2522c6b7b",
+    "iv": "000102030405060708090a0b0c0d0e0f",
+    "plaintext": "6bc1bee22e409f96e93d7e117393172a",
+    "ciphertext": "4f021db243bc633d7178183a9fa071e8",
+    "aad": "",
+    "tag": ""
+  },
+  {
+    "test_name": "NIST 800-38A AES-256-CBC Block 1",
+    "mode": "cbc",
+    "key": "603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4",
+    "iv": "000102030405060708090a0b0c0d0e0f",
+    "plaintext": "6bc1bee22e409f96e93d7e117393172a",
+    "ciphertext": "f58c4c04d6e5f1ba779eabfb5f7bfbd6",
+    "aad": "",
+    "tag": ""
+  },
+  {
+    "test_name": "NIST 800-38A AES-128-OFB Block 1",
+    "mode": "ofb",
+    "key": "2b7e151628aed2a6abf7158809cf4f3c",
+    "iv": "000102030405060708090a0b0c0d0e0f",
+    "plaintext": "6bc1bee22e409f96e93d7e117393172a",
+    "ciphertext": "3b3fd92eb72dad20333449f8e83cfb4a",
+    "aad": "",
+    "tag": ""
+  },
+  {
+    "test_name": "NIST 800-38A AES-128-OFB 2 Blocks Chained",
+    "mode": "ofb",
+    "key": "2b7e151628aed2a6abf7158809cf4f3c",
+    "iv": "000102030405060708090a0b0c0d0e0f",
+    "plaintext": "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e51",
+    "ciphertext": "3b3fd92eb72dad20333449f8e83cfb4a7789508d16918f03f53c52dac54ed825",
+    "aad": "",
+    "tag": ""
+  },
+  {
+    "test_name": "NIST 800-38A AES-256-OFB Block 1",
+    "mode": "ofb",
+    "key": "603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4",
+    "iv": "000102030405060708090a0b0c0d0e0f",
+    "plaintext": "6bc1bee22e409f96e93d7e117393172a",
+    "ciphertext": "dc7e84bfda79164b7ecd8486985d3860",
+    "aad": "",
+    "tag": ""
+  },
+  {
+    "test_name": "NIST 800-38A AES-128-CFB Block 1",
+    "mode": "cfb",
+    "key": "2b7e151628aed2a6abf7158809cf4f3c",
+    "iv": "000102030405060708090a0b0c0d0e0f",
+    "plaintext": "6bc1bee22e409f96e93d7e117393172a",
+    "ciphertext": "3b3fd92eb72dad20333449f8e83cfb4a",
+    "aad": "",
+    "tag": ""
+  },
+  {
+    "test_name": "NIST 800-38A AES-128-CFB 2 Blocks Chained",
+    "mode": "cfb",
+    "key": "2b7e151628aed2a6abf7158809cf4f3c",
+    "iv": "000102030405060708090a0b0c0d0e0f",
+    "plaintext": "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e51",
+    "ciphertext": "3b3fd92eb72dad20333449f8e83cfb4ac8a64537a0b3a93fcde3cdad9f1ce58b",
+    "aad": "",
+    "tag": ""
+  },
+  {
+    "test_name": "NIST 800-38A AES-256-CFB Block 1",
+    "mode": "cfb",
+    "key": "603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4",
+    "iv": "000102030405060708090a0b0c0d0e0f",
+    "plaintext": "6bc1bee22e409f96e93d7e117393172a",
+    "ciphertext": "dc7e84bfda79164b7ecd8486985d3860",
+    "aad": "",
+    "tag": ""
+  },
+  {
+    "test_name": "NIST 800-38A AES-128-CTR Block 1",
+    "mode": "ctr",
+    "key": "2b7e151628aed2a6abf7158809cf4f3c",
+    "iv": "f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+    "plaintext": "6bc1bee22e409f96e93d7e117393172a",
+    "ciphertext": "874d6191b620e3261bef6864990db6ce",
+    "aad": "",
+    "tag": ""
+  },
+  {
+    "test_name": "NIST 800-38A AES-128-CTR 2 Blocks Chained",
+    "mode": "ctr",
+    "key": "2b7e151628aed2a6abf7158809cf4f3c",
+    "iv": "f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+    "plaintext": "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e51",
+    "ciphertext": "874d6191b620e3261bef6864990db6ce9806f66b7970fdff8617187bb9fffdff",
+    "aad": "",
+    "tag": ""
+  },
+  {
+    "test_name": "NIST SP 800-38D AES-128-GCM Zero Vector",
+    "mode": "gcm",
+    "key": "00000000000000000000000000000000",
+    "iv": "000000000000000000000000",
+    "plaintext": "00000000000000000000000000000000",
+    "ciphertext": "0388dace60b6a392f328c2b971b2fe78",
+    "aad": "",
+    "tag": "ab6e47d42cec13bdf53a67b21257bddf"
+  },
+  {
+    "test_name": "NIST SP 800-38D AES-256-GCM Zero Vector",
+    "mode": "gcm",
+    "key": "0000000000000000000000000000000000000000000000000000000000000000",
+    "iv": "000000000000000000000000",
+    "plaintext": "00000000000000000000000000000000",
+    "ciphertext": "cea7403d4d606b6e074ec5d3baf39d18",
+    "aad": "",
+    "tag": "d0d1c8a799996bf0265b98b5d48ab919"
+  },
+  {
+    "test_name": "NIST SP 800-38D AES-128-GCM AEAD Tag Authentication",
+    "mode": "gcm",
+    "key": "feffe9928665731c6d6a8f9467308308",
+    "iv": "cafebabefacedbaddecaf888",
+    "plaintext": "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39",
+    "ciphertext": "42831ec2217774244b7221b784d0d49ce3aa212f2c02a4e035c17e2329aca12e21d514b25466931c7d8f6a5aac84aa051ba30b396a0aac973d58e091",
+    "aad": "feedfacedeadbeeffeedfacedeadbeefabaddad2",
+    "tag": "5bc94fbc3221a5db94fae95ae7121a47"
+  }
+]

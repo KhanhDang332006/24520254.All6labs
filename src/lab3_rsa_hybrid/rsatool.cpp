@@ -1,8 +1,3 @@
-#ifdef _WIN32
-  #define NOMINMAX        // Ngăn windows.h xung đột với hàm min/max chuẩn của C++
-  #include <windows.h>
-#endif
-
 #include <cryptopp/rsa.h>
 #include <cryptopp/osrng.h>
 #include <cryptopp/files.h>
@@ -15,7 +10,6 @@
 #include <cryptopp/aes.h>
 #include <cryptopp/hex.h>
 
-#include "json.hpp"
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -25,12 +19,18 @@
 #include <cstring>
 #include <algorithm>
 #include <cctype>
+#include <vector>
+#include <set>
+#include <ctime>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 using namespace CryptoPP;
-using json =nlohmann::json;
 
 // ---------------------------------------------------------
-// 1. MACROS ĐỂ EXPORT THƯ VIỆN (DLL/SO)
+// MACROS FOR DLL/SO EXPORT (CROSS-PLATFORM)
 // ---------------------------------------------------------
 #ifdef _WIN32
   #ifdef RSATOOL_BUILD_DLL
@@ -41,11 +41,20 @@ using json =nlohmann::json;
     #define RSATOOL_API extern "C"
   #endif
 #else
-  #define RSATOOL_API extern "C"
+  #if defined(__GNUC__) && __GNUC__ >= 4
+    #define RSATOOL_API extern "C" __attribute__((visibility("default")))
+  #else
+    #define RSATOOL_API extern "C"
+  #endif
 #endif
 
+// =========================================================
+// C API ERROR CODES
+// =========================================================
 #define RSATOOL_SUCCESS 0
-#define RSATOOL_ERROR   1
+#define RSATOOL_ERR_NULL_PTR -1
+#define RSATOOL_ERR_INVALID_PARAM -2
+#define RSATOOL_ERR_EXCEPTION -3
 
 namespace {
 
@@ -54,8 +63,14 @@ namespace {
 // =========================================================
 enum class KeyMaterialType { UNKNOWN, PUBLIC_KEY, PRIVATE_KEY };
 enum class KeyOutputFormat { PEM, DER, BOTH };
-enum class OutputFormat { BINARY, TEXT };
+enum class OutputFormat { BINARY, HEX, BASE64 };
 enum class InputMode { TEXT, FILE };
+
+std::string HexEncode(const std::string& data) {
+    std::string encoded;
+    StringSource ss(data, true, new HexEncoder(new StringSink(encoded)));
+    return encoded;
+}
 
 std::string HexDecode(const std::string& hex) {
     std::string decoded;
@@ -72,14 +87,26 @@ void WriteError(char* buffer, uint32_t bufferSize, const std::string& msg) {
 }
 
 std::string ToLower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { 
+        return static_cast<char>(std::tolower(c));
+     });
     return s;
 }
 
 bool ParseOutputFormat(const std::string& s, OutputFormat& fmt) {
     const std::string v = ToLower(s);
-    if (v == "binary" || v == "bin" || v == "raw") { fmt = OutputFormat::BINARY; return true; }
-    if (v == "text" || v == "base64" || v == "b64") { fmt = OutputFormat::TEXT; return true; }
+    if (v == "binary" || v == "bin" || v == "raw") { 
+        fmt = OutputFormat::BINARY; 
+        return true; 
+    }
+    if (v == "hex") { 
+        fmt = OutputFormat::HEX; 
+        return true; 
+    }
+    if (v == "text" || v == "base64" || v == "b64") { 
+        fmt = OutputFormat::BASE64; 
+        return true; 
+    }
     return false;
 }
 
@@ -103,6 +130,15 @@ std::string Base64Decode(const std::string& text) {
     return decoded;
 }
 
+std::string GetBasePrefix(const std::string& path) {
+    size_t dotPos = path.find_last_of('.');
+    size_t sepPos = path.find_last_of("/\\"); 
+    if (dotPos != std::string::npos && (sepPos == std::string::npos || dotPos > sepPos)) {
+        return path.substr(0, dotPos); 
+    }
+    return path;
+}
+
 std::string ReadFileBinary(const std::string& filename) {
     std::ifstream in(filename, std::ios::binary);
     if (!in) throw std::runtime_error("Failed to open file for reading: " + filename);
@@ -124,6 +160,23 @@ struct PEMBlock {
     std::string der;
     KeyMaterialType type = KeyMaterialType::UNKNOWN;
 };
+
+bool ParseEncodeFormat(const std::string& s, OutputFormat& fmt) {
+    const std::string v = ToLower(s);
+    if (v == "binary" || v == "bin" || v == "raw") { 
+        fmt = OutputFormat::BINARY; 
+        return true; 
+    }
+    if (v == "hex") { 
+        fmt = OutputFormat::HEX; 
+        return true; 
+    }
+    if (v == "base64" || v == "b64") { 
+        fmt = OutputFormat::BASE64; 
+        return true; 
+    }
+    return false;
+}
 
 PEMBlock DecodePEM(const std::string& pemContent) {
     PEMBlock out;
@@ -241,103 +294,76 @@ std::string DERToPEM(const std::string& derBytes, const std::string& header, con
     return header + "\n" + base64 + footer + "\n";
 }
 
+std::map<std::string, std::string> JsonEnvelopeParse(const std::string& jsonStr) {
+    std::map<std::string, std::string> result;
+    size_t pos = 0;
+
+    while ((pos = jsonStr.find('"', pos)) != std::string::npos) {
+        size_t keyStart = pos + 1;
+        size_t keyEnd = jsonStr.find('"', keyStart);
+        if (keyEnd == std::string::npos) throw std::runtime_error("Malformed JSON key");
+        
+        std::string key = jsonStr.substr(keyStart, keyEnd - keyStart);
+        
+        pos = jsonStr.find(':', keyEnd + 1);
+        if (pos == std::string::npos) throw std::runtime_error("Missing colon for key '" + key + "'");
+        
+        pos++;
+        while (pos < jsonStr.length() && std::isspace(jsonStr[pos])) pos++;
+        if (pos >= jsonStr.length()) throw std::runtime_error("Missing value for key '" + key + "'");
+
+        if (jsonStr[pos] == '"') {
+            size_t valStart = pos + 1;
+            size_t valEnd = jsonStr.find('"', valStart);
+            if (valEnd == std::string::npos) throw std::runtime_error("Unterminated string for key '" + key + "'");
+            result[key] = jsonStr.substr(valStart, valEnd - valStart);
+            pos = valEnd + 1;
+        } else {
+            size_t valStart = pos;
+            while (pos < jsonStr.length() && jsonStr[pos] != ',' && jsonStr[pos] != '}' && !std::isspace(jsonStr[pos])) {
+                pos++;
+            }
+            result[key] = jsonStr.substr(valStart, pos - valStart);
+        }
+    }
+    return result;
+}
+
+std::string JsonEnvelopeStringify(const std::vector<std::pair<std::string, std::string>>& data, const std::vector<std::string>& numericKeys) {
+    std::string json = "{\n";
+    bool first = true;
+    for (const auto& pair : data) {
+        if (!first) json += ",\n";
+        json += "  \"" + pair.first + "\": ";
+        if (std::find(numericKeys.begin(), numericKeys.end(), pair.first) != numericKeys.end()) {
+            json += pair.second; // In số không có ngoặc kép
+        } else {
+            json += "\"" + pair.second + "\""; // In chuỗi có ngoặc kép
+        }
+        first = false;
+    }
+    json += "\n}";
+    return json;
+}
+
 // =========================================================
 // LOGIC XỬ LÝ CHÍNH
 // =========================================================
 class RSA_App {
 public:
 
-    static void RunKAT(const std::string& katFile) {
-        std::ifstream ifs(katFile);
-        if (!ifs.is_open()) throw std::runtime_error("Không thể mở file KAT: " + katFile);
-        nlohmann::json j;
-        ifs >> j;
-
-        int passCount = 0;
-        int failCount = 0;
-
-        std::cout << "==================================================\n";
-        std::cout << " BẮT ĐẦU CHẠY KNOWN ANSWER TESTS (KAT) - RSA-OAEP \n";
-        std::cout << "==================================================\n";
-
-        for (const auto& tc : j) {
-            int id = tc["tcId"];
-            std::string n_hex = tc["n"];
-            std::string e_hex = tc["e"];
-            std::string d_hex = tc["d"];
-            std::string msg_hex = tc["msg"];
-            std::string label_hex = tc.contains("label") ? tc["label"] : "";
-            std::string ct_hex = tc["ct"];
-            // Wycheproof sử dụng "valid" hoặc "acceptable" cho các test case hợp lệ
-            bool expect_valid = (tc["result"] == "valid" || tc["result"] == "acceptable");
-
-            try {
-                // Khởi tạo khóa Private Key từ dữ liệu thô (n, e, d)
-                std::string n_bin = HexDecode(n_hex);
-                std::string e_bin = HexDecode(e_hex);
-                std::string d_bin = HexDecode(d_hex);
-                
-                Integer n(reinterpret_cast<const byte*>(n_bin.data()), n_bin.size());
-                Integer e(reinterpret_cast<const byte*>(e_bin.data()), e_bin.size());
-                Integer d(reinterpret_cast<const byte*>(d_bin.data()), d_bin.size());
-
-                RSA::PrivateKey priv;
-                priv.Initialize(n, e, d);
-
-                // Thiết lập cấu hình OAEP-SHA256
-                RSAES_OAEP_SHA256_Decryptor rsaDecryptor(priv);
-                std::string ct = HexDecode(ct_hex);
-                std::string expected_msg = HexDecode(msg_hex);
-                std::string label = HexDecode(label_hex);
-
-                std::string recovered;
-                recovered.resize(rsaDecryptor.MaxPlaintextLength(ct.length()));
-
-                AutoSeededRandomPool rng;
-                DecodingResult res = rsaDecryptor.Decrypt(rng,
-                    reinterpret_cast<const byte*>(ct.data()), ct.length(),
-                    reinterpret_cast<byte*>(&recovered[0]),
-                    MakeParameters(Name::EncodingParameters(), ConstByteArrayParameter(reinterpret_cast<const byte*>(label.data()), label.size()))
-                );
-
-                // Đánh giá kết quả giải mã và đối chiếu Plaintext
-                bool is_valid = res.isValidCoding && (expected_msg == recovered.substr(0, res.messageLength));
-
-                if (is_valid == expect_valid) {
-                    std::cout << "[PASS] Test Case " << id << "\n";
-                    passCount++;
-                } else {
-                    std::cout << "[FAIL] Test Case " << id << " - Trạng thái không khớp (Expected: " 
-                              << (expect_valid ? "Hợp lệ" : "Không hợp lệ") << ")\n";
-                    failCount++;
-                }
-            } catch (const std::exception& ex) {
-                if (!expect_valid) {
-                    // Nếu test case được thiết kế để gây lỗi (invalid ciphertext/label), bắt được exception là PASS
-                    std::cout << "[PASS] Test Case " << id << " (Bắt được lỗi như dự kiến: " << ex.what() << ")\n";
-                    passCount++;
-                } else {
-                    std::cout << "[FAIL] Test Case " << id << " - Lỗi hệ thống: " << ex.what() << "\n";
-                    failCount++;
-                }
-            }
-        }
-
-        std::cout << "\n---------------- KAT SUMMARY ----------------\n";
-        std::cout << "Tổng số Test Cases : " << (passCount + failCount) << "\n";
-        std::cout << "Thành công (PASS)  : " << passCount << "\n";
-        std::cout << "Thất bại   (FAIL)  : " << failCount << "\n";
-        std::cout << "==================================================\n";
-    }
-
-    static void KeyGen(uint32_t bits, const std::string& prefix, KeyOutputFormat format) {
+    static void KeyGen(uint32_t bits, const std::string& pubFile, const std::string& privFile) {
         if (bits != 3072 && bits != 4096) {
             throw std::invalid_argument("Invalid RSA Modulus size. Standards strictly require 3072 or 4096 bits.");
         }
 
+        // --- MỚI: Tự động chuẩn hóa tên file thành prefix ---
+        std::string pubBase = GetBasePrefix(pubFile);
+        std::string privBase = GetBasePrefix(privFile);
+
         AutoSeededRandomPool rng;
         InvertibleRSAFunction params;
-        params.Initialize(rng, bits, Integer(65537)); // Bắt buộc e = 65537
+        params.Initialize(rng, bits, Integer(65537)); 
 
         RSA::PrivateKey privateKey(params);
         RSA::PublicKey publicKey(params);
@@ -352,21 +378,43 @@ public:
         std::string privDerBytes = QueueToString(privQ);
         std::string pubDerBytes = QueueToString(pubQ);
 
-        if (format == KeyOutputFormat::DER || format == KeyOutputFormat::BOTH) {
-            WriteFileBinary(prefix + "_private.der", privDerBytes);
-            WriteFileBinary(prefix + "_public.der", pubDerBytes);
-        }
+        try {
+            // Sử dụng pubBase và privBase thay cho pubFile/privFile
+            WriteFileBinary(privBase + ".der", privDerBytes);
+            WriteFileBinary(pubBase + ".der", pubDerBytes);
 
-        if (format == KeyOutputFormat::PEM || format == KeyOutputFormat::BOTH) {
-            WriteFileBinary(prefix + "_private.pem", DERToPEM(privDerBytes, "-----BEGIN RSA PRIVATE KEY-----", "-----END RSA PRIVATE KEY-----"));
-            WriteFileBinary(prefix + "_public.pem", DERToPEM(pubDerBytes, "-----BEGIN RSA PUBLIC KEY-----", "-----END RSA PUBLIC KEY-----"));
-        }
+            WriteFileBinary(privBase + ".pem", DERToPEM(privDerBytes, "-----BEGIN RSA PRIVATE KEY-----", "-----END RSA PRIVATE KEY-----"));
+            WriteFileBinary(pubBase + ".pem", DERToPEM(pubDerBytes, "-----BEGIN RSA PUBLIC KEY-----", "-----END RSA PUBLIC KEY-----"));
 
-        auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-        std::string meta = "{\n  \"creation_time\": \"" + std::string(std::ctime(&now));
-        meta.pop_back(); 
-        meta += "\",\n  \"modulus_bits\": " + std::to_string(bits) + ",\n  \"hash\": \"SHA-256\"\n}\n";
-        WriteFileBinary(prefix + "_metadata.json", meta);
+            auto now = std::chrono::system_clock::now();
+            std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+            struct tm timeinfo;
+            #ifdef _WIN32
+                localtime_s(&timeinfo, &now_c);
+            #else
+                localtime_r(&now_c, &timeinfo);
+            #endif
+            
+            char timeBuf[64];
+            std::strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d %H:%M:%S", &timeinfo);
+
+            std::string meta = "{\n";
+            meta += "  \"creation_time\": \"" + std::string(timeBuf) + "\",\n";
+            meta += "  \"modulus_bits\": " + std::to_string(bits) + ",\n";
+            meta += "  \"hash\": \"SHA-256\"\n";
+            meta += "}\n";
+
+            WriteFileBinary(pubBase + "_metadata.json", meta);
+
+            if (!privDerBytes.empty()) {
+                CryptoPP::SecureWipeArray(reinterpret_cast<byte*>(&privDerBytes[0]), privDerBytes.size());
+            }
+        } catch (...) {
+            if (!privDerBytes.empty()) {
+                CryptoPP::SecureWipeArray(reinterpret_cast<byte*>(&privDerBytes[0]), privDerBytes.size());
+            }
+            throw;
+        }
     }
 
     static std::string LoadInput(InputMode inputMode, const std::string& inputValue) {
@@ -376,142 +424,260 @@ public:
 
     static void EncryptData(InputMode inMode, const std::string& inValue, const std::string& keyPath, const std::string& outFile, OutputFormat outFormat, const std::string& label) {
         AutoSeededRandomPool rng;
-        RSA::PublicKey pubKey = LoadEncryptionKeyFromFile(keyPath);
+        RSA::PublicKey pubKey;
+        try {
+            pubKey = LoadEncryptionKeyFromFile(keyPath);
+        } catch (...) {
+            throw std::runtime_error("Cryptographic operation failed: Integrity check or wrong key.");
+        }
+
         std::string plaintext = LoadInput(inMode, inValue);
-        
-        RSAES_OAEP_SHA256_Encryptor rsaEncryptor(pubKey);
         std::string finalOutput;
         
-        if (plaintext.length() <= rsaEncryptor.FixedMaxPlaintextLength()) {
-            std::string ciphertext;
-            ciphertext.resize(rsaEncryptor.CiphertextLength(plaintext.length()));
-
-            rsaEncryptor.Encrypt(rng, 
-                reinterpret_cast<const byte*>(plaintext.data()), plaintext.length(),
-                reinterpret_cast<byte*>(&ciphertext[0]),
-                MakeParameters(Name::EncodingParameters(), ConstByteArrayParameter(reinterpret_cast<const byte*>(label.data()), label.size()))
-            );
-            finalOutput = ciphertext;
-        } else {
-            // Hybrid Encryption
-            SecByteBlock aesKey(AES::MAX_KEYLENGTH);
-            SecByteBlock iv(12);
-            rng.GenerateBlock(aesKey, aesKey.size());
-            rng.GenerateBlock(iv, iv.size());
-
-            std::string aesCiphertext;
-            GCM<AES>::Encryption gcm;
-            gcm.SetKeyWithIV(aesKey, aesKey.size(), iv, iv.size());
-            if (!label.empty()) {
-                gcm.SpecifyDataLengths(label.size(), plaintext.size(), 0);
-                gcm.Update(reinterpret_cast<const byte*>(label.data()), label.size());
-            }
-            StringSource(plaintext, true, new AuthenticatedEncryptionFilter(gcm, new StringSink(aesCiphertext)));
+        try {
+            RSAES_OAEP_SHA256_Encryptor rsaEncryptor(pubKey);
             
-            std::string actualCt = aesCiphertext.substr(0, aesCiphertext.length() - 16);
-            std::string macTag = aesCiphertext.substr(aesCiphertext.length() - 16);
+            if (plaintext.length() <= rsaEncryptor.FixedMaxPlaintextLength()) {
+                std::string ciphertext;
+                ciphertext.resize(rsaEncryptor.CiphertextLength(plaintext.length()));
 
-            std::string wrappedKey;
-            StringSource(aesKey.data(), aesKey.size(), true, new PK_EncryptorFilter(rng, rsaEncryptor, new StringSink(wrappedKey)));
+                rsaEncryptor.Encrypt(rng, 
+                    reinterpret_cast<const byte*>(plaintext.data()), plaintext.length(),
+                    reinterpret_cast<byte*>(&ciphertext[0]),
+                    MakeParameters(Name::EncodingParameters(), ConstByteArrayParameter(reinterpret_cast<const byte*>(label.data()), label.size()))
+                );
+                finalOutput = ciphertext;
+            } else {
+                SecByteBlock aesKey(AES::MAX_KEYLENGTH);
+                SecByteBlock iv(12);
+                rng.GenerateBlock(aesKey, aesKey.size());
+                rng.GenerateBlock(iv, iv.size());
 
-            json header_json;
-            header_json["mode"] = "RSA-OAEP-AES-GCM";
-            header_json["rsa_modulus"] = pubKey.GetModulus().BitCount();
-            header_json["hash"] = "SHA-256";
-            header_json["wrapped_key"] = Base64Encode(wrappedKey);
-            header_json["iv"] = Base64Encode(std::string(reinterpret_cast<const char*>(iv.data()), iv.size()));
-            header_json["tag"] = Base64Encode(macTag);
+                std::string aesCiphertext;
+                GCM<AES>::Encryption gcm;
+                gcm.SetKeyWithIV(aesKey, aesKey.size(), iv, iv.size());
+                if (!label.empty()) {
+                    gcm.SpecifyDataLengths(label.size(), plaintext.size(), 0);
+                    gcm.Update(reinterpret_cast<const byte*>(label.data()), label.size());
+                }
+                StringSource(plaintext, true, new AuthenticatedEncryptionFilter(gcm, new StringSink(aesCiphertext)));
+                
+                std::string actualCt = aesCiphertext.substr(0, aesCiphertext.length() - 16);
+                std::string macTag = aesCiphertext.substr(aesCiphertext.length() - 16);
 
+                std::string wrappedKey;
+                StringSource(aesKey.data(), aesKey.size(), true, new PK_EncryptorFilter(rng, rsaEncryptor, new StringSink(wrappedKey)));
 
-            std::string jsonHeader = header_json.dump(2) + "\n--PAYLOAD--\n";
-            finalOutput = jsonHeader + actualCt;
+                std::vector<std::pair<std::string, std::string>> header_data = {
+                    {"mode", "RSA-OAEP-AES-GCM"},
+                    {"rsa_modulus", std::to_string(pubKey.GetModulus().BitCount())},
+                    {"hash", "SHA-256"},
+                    {"wrapped_key", Base64Encode(wrappedKey)},
+                    {"iv", Base64Encode(std::string(reinterpret_cast<const char*>(iv.data()), iv.size()))},
+                    {"tag", Base64Encode(macTag)}
+                };
+
+                std::vector<std::string> numericKeys = {"rsa_modulus"};
+                std::string jsonHeader = JsonEnvelopeStringify(header_data, numericKeys) + "\n--PAYLOAD--\n";
+                finalOutput = jsonHeader + actualCt;
+            }
+
+            if (outFormat == OutputFormat::BASE64) finalOutput = Base64Encode(finalOutput);
+            else if (outFormat == OutputFormat::HEX) finalOutput = HexEncode(finalOutput);
+            
+            if (outFile.empty()) {
+                std::cout << finalOutput << "\n";
+            } else {
+                WriteFileBinary(outFile, finalOutput);
+            }
+
+            if (!plaintext.empty()) CryptoPP::SecureWipeArray(reinterpret_cast<byte*>(&plaintext[0]), plaintext.size());
+        } catch (...) {
+            if (!plaintext.empty()) CryptoPP::SecureWipeArray(reinterpret_cast<byte*>(&plaintext[0]), plaintext.size());
+            throw std::runtime_error("Cryptographic operation failed: Integrity check or wrong key.");
         }
-
-        if (outFormat == OutputFormat::TEXT) {
-            finalOutput = Base64Encode(finalOutput);
-        }
-        WriteFileBinary(outFile, finalOutput);
     }
 
     static void DecryptData(InputMode inMode, const std::string& inValue, const std::string& keyPath, const std::string& outFile, OutputFormat inFormat, const std::string& label) {
         AutoSeededRandomPool rng;
-        RSA::PrivateKey privKey = LoadDecryptionKeyFromFile(keyPath);
+        RSA::PrivateKey privKey;
+        try {
+            privKey = LoadDecryptionKeyFromFile(keyPath);
+        } catch (...) {
+            throw std::runtime_error("File not found");
+        }
+
         std::string ciphertext = LoadInput(inMode, inValue);
+        if (inFormat == OutputFormat::BASE64) ciphertext = Base64Decode(ciphertext);
+        else if (inFormat == OutputFormat::HEX) ciphertext = HexDecode(ciphertext);
 
-        if (inFormat == OutputFormat::TEXT) {
-            ciphertext = Base64Decode(ciphertext);
-        }
+        std::string aesKey;
+        std::string recovered;
 
-        size_t payloadPos = ciphertext.find("--PAYLOAD--\n");
-        if (payloadPos != std::string::npos) {
-            // Hybrid Decryption
-            std::string header = ciphertext.substr(0, payloadPos);
-            std::string actualCt = ciphertext.substr(payloadPos + 12);
+        try {
+            size_t payloadPos = ciphertext.find("--PAYLOAD--\n");
+            if (payloadPos != std::string::npos) {
+                std::string header = ciphertext.substr(0, payloadPos);
+                std::string actualCt = ciphertext.substr(payloadPos + 12);
+                
+                std::map<std::string, std::string> j = JsonEnvelopeParse(header); 
 
-           try {
-                // 1. Parse chuỗi thành cấu trúc dữ liệu JSON
-                json j = json::parse(header);
-
-                // 2. Validate bảo mật (Sản phẩm chuẩn phải có)
-                if (!j.contains("mode") || j["mode"] != "RSA-OAEP-AES-GCM") {
-                    throw std::runtime_error("Tampered Header: Unsupported encryption mode");
-                }
-                if (!j.contains("hash") || j["hash"] != "SHA-256") {
-                    throw std::runtime_error("Tampered Header: Mismatched hash algorithm");
-                }
-                if (!j.contains("wrapped_key") || !j.contains("iv") || !j.contains("tag")) {
-                    throw std::runtime_error("Corrupted Header: Missing crypto parameters");
+                if (j.find("mode") == j.end() || j["mode"] != "RSA-OAEP-AES-GCM" || 
+                    j.find("hash") == j.end() || j["hash"] != "SHA-256") {
+                    throw std::runtime_error("Cryptographic operation failed: Integrity check or wrong key.");
                 }
 
-            std::string wrappedKey = Base64Decode(j["wrapped_key"].get<std::string>());
-            std::string iv = Base64Decode(j["iv"].get<std::string>());
-            std::string tag = Base64Decode(j["tag"].get<std::string>());
+                std::string wrappedKey = Base64Decode(j["wrapped_key"]);
+                std::string iv = Base64Decode(j["iv"]);
+                std::string tag = Base64Decode(j["tag"]);
 
-            RSAES_OAEP_SHA256_Decryptor rsaDecryptor(privKey);
-            std::string aesKey;
-            StringSource(wrappedKey, true, new PK_DecryptorFilter(rng, rsaDecryptor, new StringSink(aesKey)));
+                RSAES_OAEP_SHA256_Decryptor rsaDecryptor(privKey);
+                StringSource(wrappedKey, true, new PK_DecryptorFilter(rng, rsaDecryptor, new StringSink(aesKey)));
 
-            GCM<AES>::Decryption gcm;
-            gcm.SetKeyWithIV(reinterpret_cast<const byte*>(aesKey.data()), aesKey.size(), reinterpret_cast<const byte*>(iv.data()), iv.size());
-            if (!label.empty()) {
-                gcm.SpecifyDataLengths(label.size(), actualCt.size(), 0);
-                gcm.Update(reinterpret_cast<const byte*>(label.data()), label.size());
+                GCM<AES>::Decryption gcm;
+                gcm.SetKeyWithIV(reinterpret_cast<const byte*>(aesKey.data()), aesKey.size(), reinterpret_cast<const byte*>(iv.data()), iv.size());
+                if (!label.empty()) {
+                    gcm.SpecifyDataLengths(label.size(), actualCt.size(), 0);
+                    gcm.Update(reinterpret_cast<const byte*>(label.data()), label.size());
+                }
+
+                AuthenticatedDecryptionFilter df(gcm, new StringSink(recovered));
+                df.Put(reinterpret_cast<const byte*>(actualCt.data()), actualCt.size());
+                df.Put(reinterpret_cast<const byte*>(tag.data()), tag.size());
+                df.MessageEnd(); 
+            } else {
+                RSAES_OAEP_SHA256_Decryptor rsaDecryptor(privKey);
+                recovered.resize(rsaDecryptor.MaxPlaintextLength(ciphertext.length()));
+                DecodingResult result = rsaDecryptor.Decrypt(rng, 
+                    reinterpret_cast<const byte*>(ciphertext.data()), ciphertext.length(),
+                    reinterpret_cast<byte*>(&recovered[0]),
+                    MakeParameters(Name::EncodingParameters(), ConstByteArrayParameter(reinterpret_cast<const byte*>(label.data()), label.size()))
+                );
+                if (!result.isValidCoding) throw std::runtime_error("invalid coding");
+                recovered.resize(result.messageLength); 
             }
 
-            std::string recovered;
-            AuthenticatedDecryptionFilter df(gcm, new StringSink(recovered));
-            df.Put(reinterpret_cast<const byte*>(actualCt.data()), actualCt.size());
-            df.Put(reinterpret_cast<const byte*>(tag.data()), tag.size());
-            df.MessageEnd();
+            if (outFile.empty()) {
+                std::cout << (inFormat == OutputFormat::BINARY ? HexEncode(recovered) : recovered) << "\n";
+            } else {
+                WriteFileBinary(outFile, recovered);
+            }
 
-            WriteFileBinary(outFile, recovered);
+            if (!aesKey.empty()) CryptoPP::SecureWipeArray(reinterpret_cast<byte*>(&aesKey[0]), aesKey.size());
+            if (!recovered.empty()) CryptoPP::SecureWipeArray(reinterpret_cast<byte*>(&recovered[0]), recovered.size());
 
-            } catch (const json::parse_error& e) {
-        // Bắt lỗi nếu kẻ tấn công phá cú pháp JSON (thiếu dấu phẩy, dấu ngoặc...)
-        throw std::runtime_error("Decryption failed: Invalid Envelope Header format.");
-    } catch (const json::type_error& e) {
-        // Bắt lỗi nếu kẻ tấn công cố tình đổi kiểu dữ liệu (vd truyền số thay vì chuỗi)
-        throw std::runtime_error("Decryption failed: Header type mismatch.");
+        } catch (...) {
+            if (!aesKey.empty()) CryptoPP::SecureWipeArray(reinterpret_cast<byte*>(&aesKey[0]), aesKey.size());
+            if (!recovered.empty()) CryptoPP::SecureWipeArray(reinterpret_cast<byte*>(&recovered[0]), recovered.size());
+            throw std::runtime_error("Cryptographic operation failed: Integrity check or wrong key.");
+        }
     }
-        } else {
-            // Direct Decryption 
-            RSAES_OAEP_SHA256_Decryptor rsaDecryptor(privKey);
-            std::string recovered;
-            recovered.resize(rsaDecryptor.MaxPlaintextLength(ciphertext.length()));
 
-            DecodingResult result = rsaDecryptor.Decrypt(rng, 
-                reinterpret_cast<const byte*>(ciphertext.data()), ciphertext.length(),
-                reinterpret_cast<byte*>(&recovered[0]),
-                MakeParameters(Name::EncodingParameters(), ConstByteArrayParameter(reinterpret_cast<const byte*>(label.data()), label.size()))
-            );
+    static void RunKAT(const std::string& katFile) {
+        std::string json = ReadFileBinary(katFile);
+        std::cout << "[*] Running Known Answer Tests from: " << katFile << "\n";
+        
+        size_t pos = 0;
+        int passed = 0, failed = 0, total = 0;
 
-            if (!result.isValidCoding) {
-                throw std::runtime_error("Decryption failed: Label mismatch or corrupted ciphertext!");
-            }
+        AutoSeededRandomPool rng;
+
+        while ((pos = json.find("\"tcId\"", pos)) != std::string::npos) {
+            total++;
+            size_t currentTcPos = pos; 
+            pos += 6; 
             
-            recovered.resize(result.messageLength); 
-            WriteFileBinary(outFile, recovered);
+            auto extractString = [&](const std::string& key, size_t startPos) -> std::string {
+                std::string searchKey = "\"" + key + "\"";
+                size_t keyPos = json.find(searchKey, startPos);
+                if (keyPos == std::string::npos) return "";
+                
+                size_t colonPos = json.find(":", keyPos + searchKey.length());
+                if (colonPos == std::string::npos) return "";
+
+                size_t valStart = json.find("\"", colonPos);
+                if (valStart == std::string::npos) return "";
+
+                size_t valEnd = json.find("\"", valStart + 1);
+                if (valEnd == std::string::npos) return "";
+
+                return json.substr(valStart + 1, valEnd - valStart - 1);
+            };
+
+            std::string tcIdStr = std::to_string(total);
+            size_t idPos = json.find("\"tcId\"", currentTcPos);
+            if (idPos != std::string::npos) {
+                size_t colonPos = json.find(":", idPos);
+                if (colonPos != std::string::npos) {
+                    size_t start = colonPos + 1;
+                    while (start < json.length() && std::isspace(json[start])) start++;
+                    size_t end = start;
+                    while (end < json.length() && std::isdigit(json[end])) end++;
+                    if (end > start) tcIdStr = json.substr(start, end - start);
+                }
+            }
+
+            std::string keyPath = extractString("keyPath", currentTcPos);
+            std::string msgHex = extractString("msg", currentTcPos);
+            std::string ctHex = extractString("ct", currentTcPos);
+            std::string labelHex = extractString("label", currentTcPos);
+            std::string resultStr = extractString("result", currentTcPos);
+            
+            if (resultStr.empty() || keyPath.empty()) { continue; }
+
+            std::string expectedMsg = HexDecode(msgHex);
+            std::string cipherText = HexDecode(ctHex);
+            std::string label = HexDecode(labelHex);
+            
+            bool testPassed = false;
+            std::string errorMsg = "";
+
+            try {
+                RSA::PrivateKey privKey = LoadDecryptionKeyFromFile(keyPath);
+                RSAES_OAEP_SHA256_Decryptor rsaDecryptor(privKey);
+                
+                std::string recovered;
+                recovered.resize(rsaDecryptor.MaxPlaintextLength(cipherText.length()));
+                
+                DecodingResult result = rsaDecryptor.Decrypt(rng, 
+                    reinterpret_cast<const byte*>(cipherText.data()), cipherText.length(),
+                    reinterpret_cast<byte*>(&recovered[0]),
+                    MakeParameters(Name::EncodingParameters(), ConstByteArrayParameter(reinterpret_cast<const byte*>(label.data()), label.size()))
+                );
+                
+                if (!result.isValidCoding) {
+                    throw std::runtime_error("invalid coding (Padding oracle triggered)");
+                }
+                recovered.resize(result.messageLength);
+
+                if (resultStr == "valid" || resultStr == "acceptable") {
+                    if (recovered == expectedMsg) {
+                        testPassed = true;
+                    } else {
+                        errorMsg = "Plaintext mismatch";
+                    }
+                } else {
+                    errorMsg = "Decryption succeeded but was expected to fail";
+                }
+                
+            } catch (const std::exception& e) {
+                if (resultStr == "invalid") {
+                    testPassed = true; 
+                } else {
+                    errorMsg = std::string("Decryption failed: ") + e.what();
+                }
+            }
+
+            if (testPassed) {
+                std::cout << "  [+] Test " << tcIdStr << " (" << resultStr << "): PASS\n";
+                passed++;
+            } else {
+                std::cout << "  [-] Test " << tcIdStr << " (" << resultStr << "): FAIL - " << errorMsg << "\n";
+                failed++;
+            }
         }
+        std::cout << "=========================================================\n";
+        std::cout << "KAT Summary: " << passed << "/" << total << " passed. Failed: " << failed << "\n";
     }
 };
 
@@ -521,17 +687,18 @@ public:
 // EXPORT C-API VÀ MAIN CLI
 // =========================================================
 
-RSATOOL_API int rsatool_keygen(uint32_t bits, const char* prefix, const char* format_str, char* err_msg, uint32_t err_size) {
+RSATOOL_API int rsatool_keygen(uint32_t bits, const char* pub_file, const char* priv_file, char* err_msg, uint32_t err_size) {
     try {
-        if (!prefix || !format_str) throw std::invalid_argument("Prefix and format cannot be null");
-        KeyOutputFormat fmt;
-        if (!ParseKeyFormat(format_str, fmt)) throw std::invalid_argument("Invalid format. Use pem, der, or both.");
-        RSA_App::KeyGen(bits, prefix, fmt);
+        if (!pub_file || !priv_file) throw std::invalid_argument("Public and Private key prefixes cannot be null");
+        
+        // Gọi thẳng hàm KeyGen mới (đã ép cứng xuất cả PEM và DER)
+        RSA_App::KeyGen(bits, pub_file, priv_file);
+        
         WriteError(err_msg, err_size, "");
         return RSATOOL_SUCCESS;
     } catch (const std::exception& e) {
         WriteError(err_msg, err_size, e.what());
-        return RSATOOL_ERROR;
+        return RSATOOL_ERR_EXCEPTION;
     }
 }
 
@@ -544,7 +711,7 @@ RSATOOL_API int rsatool_encrypt(const char* in_file, const char* key_path, const
         return RSATOOL_SUCCESS;
     } catch (const std::exception& e) {
         WriteError(err_msg, err_size, std::string("Encryption failed: ") + e.what());
-        return RSATOOL_ERROR;
+        return RSATOOL_ERR_EXCEPTION;
     }
 }
 
@@ -557,124 +724,182 @@ RSATOOL_API int rsatool_decrypt(const char* in_file, const char* key_path, const
         return RSATOOL_SUCCESS;
     } catch (const std::exception& e) {
         WriteError(err_msg, err_size, std::string("Decryption failed: ") + e.what());
-        return RSATOOL_ERROR;
+        return RSATOOL_ERR_EXCEPTION;
     }
 }
 
+// ============================================================================
+// COMMAND LINE INTERFACE & KAT RUNNER (UNIFIED ARCHITECTURE)
+// ============================================================================
 #ifndef RSATOOL_NO_MAIN
+
+// --- 1. ĐỒNG NHẤT CẤU TRÚC CONFIG (Dành riêng cho Lab 3 - RSA) ---
+// (Đặt ngay đây vì chỉ có CLI và main sử dụng)
+struct CryptoConfig {
+    bool isEncrypt;
+    std::string keyPath;
+    InputMode inMode;
+    std::string inValue;
+    std::string outFile;
+    OutputFormat outFormat;
+    std::string label;
+    bool isVerbose = false;
+};
+
 void PrintUsage(const char* prog) {
     std::cerr
-        << "RSATOOL - Hybrid RSA-OAEP / AES-GCM Tool\n\n"
         << "Usage:\n"
-        << "  " << prog << " keygen --bits <3072|4096> --prefix <name> [--format pem|der|both]\n"
-        << "  " << prog << " encrypt --key <keyfile> (--in <file> | --text <string>) --out <file> [--out-format binary|text] [--label <text>]\n"
-        << "  " << prog << " decrypt --key <keyfile> (--in <file> | --text <string>) --out <file> [--in-format binary|text]  [--label <text>]\n"
-        << "  " << prog << " --kat <vectors.json>\n\n"
-        << "Options:\n"
-        << "  --key <path>       RSA key file in PEM or DER. Automatically handles Public or Private keys.\n"
-        << "  --text <string>    Input from command line string.\n"
-        << "  --in <path>        Input from file.\n"
-        << "  --out <path>       Output file path.\n"
-        << "  --format           pem | der | both (For keygen, default: both)\n"
-        << "  --out-format       binary | text (For encryption output, default: binary)\n"
-        << "  --in-format        binary | text (For decryption input, default: binary)\n"
-        << "  --kat <path>       Run Known Answer Tests (KAT) against a Wycheproof JSON file.\n\n"
-        << "Examples:\n"
-        << "  " << prog << " keygen --bits 3072 --prefix server --format pem\n"
-        << "  " << prog << " encrypt --key server_public.pem --text \"Secret payload\" --out cipher.bin --label \"v1\"\n"
-        << "  " << prog << " decrypt --key server_private.pem --in cipher.bin --out plain.txt --label \"v1\"\n"
-        << "  " << prog << " --kat rsa_oaep_3072_sha256_mgf1sha256_test.json\n";
+        << "  " << prog << " keygen --bits <3072|4096> --pub <pub_file_prefix> --priv <priv_file_prefix>\n"
+        << "  " << prog << " encrypt (--in <file> | --text <string>) --pub <pub.pem> [--out <file>] [--encode raw|hex|base64] [--label <text>]\n"
+        << "  " << prog << " decrypt (--in <file> | --text <string>) --priv <priv.pem> [--out <file>] [--encode raw|hex|base64] [--label <text>]\n"
+        << "  " << prog << " --kat <path/to/vectors.json>\n"
+        << "Run '" << prog << " --help' for more information.\n";
 }
 
-int main(int argc, char* argv[]) {
+void PrintHelp(const char* prog) {
+    std::cerr << "=========================================================\n";
+    std::cerr << "       RSATOOL - Hybrid RSA-OAEP / AES-GCM Tool          \n";
+    std::cerr << "=========================================================\n\n";
+    PrintUsage(prog);
+    std::cerr
+        << "\nOptions:\n"
+        << "  --pub <path>       Public Key path (Required for Encrypt / Prefix for Keygen).\n"
+        << "  --priv <path>      Private Key path (Required for Decrypt / Prefix for Keygen).\n"
+        << "  --in <path>        Input file (binary-safe).\n"
+        << "  --text <string>    Input text string (UTF-8).\n"
+        << "  --out <path>       Output file (Optional. Prints to screen if omitted).\n"
+        << "  --encode <fmt>     Encoding format: raw | hex | base64.\n"
+        << "                     (File default: raw. Screen default: hex).\n"
+        << "  --label <text>     Optional OAEP label.\n"
+        << "  --kat <path>       Run Known Answer Tests from JSON.\n"
+        << "  --verbose          Enable detailed execution logs.\n"
+        << "=========================================================\n";
+}
 
+// --- 2. ĐỒNG NHẤT CLI PARSER (Bảo vệ đầu vào) ---
+class CliParser {
+public:
+    static CryptoConfig Parse(int argc, char* argv[], const std::string& command) {
+        CryptoConfig cfg;
+        cfg.isEncrypt = (command == "encrypt");
+        std::map<std::string, std::string> args;
+        std::set<std::string> flags;
+
+        // Quét tham số Fail-Closed
+        for (int i = 2; i < argc; i++) {
+            std::string arg = argv[i];
+            if (arg == "--verbose") { flags.insert(arg); continue; }
+            if (arg.substr(0, 2) == "--") {
+                if (i + 1 >= argc || argv[i+1][0] == '-') throw std::invalid_argument("Fail Closed: Missing value for " + arg);
+                if (args.count(arg)) throw std::invalid_argument("Fail Closed: Duplicate argument " + arg);
+                args[arg] = argv[++i];
+            } else { throw std::invalid_argument("Fail Closed: Unknown positional argument " + arg); }
+        }
+
+        cfg.isVerbose = flags.count("--verbose");
+
+        // Validate logic Key
+        if (cfg.isEncrypt) {
+            if (!args.count("--pub")) throw std::invalid_argument("Fail Closed: Encryption requires --pub parameter.");
+            cfg.keyPath = args["--pub"];
+        } else {
+            if (!args.count("--priv")) throw std::invalid_argument("Fail Closed: Decryption requires --priv parameter.");
+            cfg.keyPath = args["--priv"];
+        }
+
+        // Validate Input
+        bool hasIn = args.count("--in");
+        bool hasText = args.count("--text");
+        if (hasIn == hasText) throw std::invalid_argument("Fail Closed: Specify exactly one input mode: --in OR --text.");
+        
+        cfg.inMode = hasText ? InputMode::TEXT : InputMode::FILE;
+        cfg.inValue = hasText ? args["--text"] : args["--in"];
+        cfg.outFile = args.count("--out") ? args["--out"] : "";
+        cfg.label = args.count("--label") ? args["--label"] : "";
+
+        // Quy tắc Encoding PDF
+        cfg.outFormat = cfg.outFile.empty() ? OutputFormat::HEX : OutputFormat::BINARY;
+        if (args.count("--encode") && !ParseEncodeFormat(args["--encode"], cfg.outFormat)) {
+            throw std::invalid_argument("Fail Closed: Invalid --encode value. Use raw, hex, or base64.");
+        }
+
+        return cfg;
+    }
+};
+
+// --- 3. HÀM MAIN SẠCH SẼ VÀ CỨNG CÁP ---
+int main(int argc, char* argv[]) {
     #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
     #endif
 
-    if (argc < 2) {
-        PrintUsage(argv[0]);
-        return 1;
-    }
-
+    if (argc < 2) { PrintUsage(argv[0]); return 1; }
     std::string command = argv[1];
-    if (command == "--help" || command == "-h") {
-        PrintUsage(argv[0]);
+    
+    if (command == "--help" || command == "-h") { PrintHelp(argv[0]); return 0; }
+
+    if (command == "--kat") {
+        if (argc < 3) {
+            std::cerr << "[!] Fail Closed: Missing path for --kat. Example: --kat vectors.json\n";
+            return 1;
+        }
+        try {
+            RSA_App::RunKAT(argv[2]); // Tái sử dụng hàm KAT có sẵn của Lab 3
+        } catch (const std::exception& e) {
+            std::cerr << "[!] CRITICAL ERROR (KAT): " << e.what() << "\n";
+            return 1;
+        }
         return 0;
     }
 
-    std::map<std::string, std::string> args;
-    for (int i = 2; i < argc; i++) {
-        std::string arg = argv[i];
-        if (arg.substr(0, 2) == "--" && i + 1 < argc) {
-            args[arg] = argv[++i];
-        }
-    }
-
     try {
-        if (command == "--kat") {
-            if (argc < 3) {
-                throw std::invalid_argument("Thiếu đường dẫn đến file vectors.json. Tham số: --kat <file_path>");
+        if (command == "keygen") {
+            uint32_t bits = 3072;
+            std::string pubFile, privFile;
+            for (int i = 2; i < argc; i++) {
+                std::string arg = argv[i];
+                if (arg == "--bits" && i + 1 < argc) bits = std::stoul(argv[++i]);
+                else if (arg == "--pub" && i + 1 < argc) pubFile = argv[++i];
+                else if (arg == "--priv" && i + 1 < argc) privFile = argv[++i];
             }
-            RSA_App::RunKAT(argv[2]);
+            
+            if (pubFile.empty() || privFile.empty()) {
+                throw std::invalid_argument("Fail Closed: Missing --pub or --priv parameters.");
+            }
+            
+            RSA_App::KeyGen(bits, pubFile, privFile);
+            std::cout << "[+] Keygen successful. Modulus: " << bits << "-bit.\n";
             return 0;
-        }
-        else if (command == "keygen") {
-            uint32_t bits = args.count("--bits") ? std::stoul(args["--bits"]) : 3072;
-            if (!args.count("--prefix")) throw std::invalid_argument("Missing --prefix parameter.");
-            
-            KeyOutputFormat fmt = KeyOutputFormat::BOTH;
-            if (args.count("--format") && !ParseKeyFormat(args["--format"], fmt)) {
-                throw std::invalid_argument("Invalid --format value. Use pem, der, or both.");
-            }
-            
-            RSA_App::KeyGen(bits, args["--prefix"], fmt);
-            std::cout << "[+] Keygen successful. Prefix: " << args["--prefix"] << "\n";
         } 
         else if (command == "encrypt" || command == "decrypt") {
-            bool isEncrypt = (command == "encrypt");
             
-            if (!args.count("--key")) throw std::invalid_argument("Missing --key parameter.");
-            if (!args.count("--out")) throw std::invalid_argument("Missing --out parameter.");
+            // Cổng Gatekeeper
+            CryptoConfig cfg = CliParser::Parse(argc, argv, command);
 
-            bool hasText = args.count("--text");
-            bool hasIn = args.count("--in");
-            if (hasText == hasIn) {
-                throw std::invalid_argument("Specify exactly one of --text or --in.");
-            }
+            if (cfg.isVerbose) std::cout << "[INFO] Target key file: " << cfg.keyPath << "\n";
 
-            InputMode inMode = hasText ? InputMode::TEXT : InputMode::FILE;
-            std::string inValue = hasText ? args["--text"] : args["--in"];
-            std::string label = args.count("--label") ? args["--label"] : "";
-
-            OutputFormat fmt = OutputFormat::BINARY;
-            std::string fmtArg = isEncrypt ? (args.count("--out-format") ? args["--out-format"] : "") 
-                                           : (args.count("--in-format") ? args["--in-format"] : "");
-            
-            if (!fmtArg.empty() && !ParseOutputFormat(fmtArg, fmt)) {
-                throw std::invalid_argument("Invalid format value. Use binary or text.");
-            }
-
-            if (isEncrypt) {
-                RSA_App::EncryptData(inMode, inValue, args["--key"], args["--out"], fmt, label);
+            // Gọi Core Logic
+            if (cfg.isEncrypt) {
+                RSA_App::EncryptData(cfg.inMode, cfg.inValue, cfg.keyPath, cfg.outFile, cfg.outFormat, cfg.label);
             } else {
-                RSA_App::DecryptData(inMode, inValue, args["--key"], args["--out"], fmt, label);
+                RSA_App::DecryptData(cfg.inMode, cfg.inValue, cfg.keyPath, cfg.outFile, cfg.outFormat, cfg.label);
             }
             
-            std::cout << "[+] " << (isEncrypt ? "Encryption" : "Decryption") << " successful.\n";
-            std::cout << "    Key: " << args["--key"] << "\n";
-            std::cout << "    Output: " << args["--out"] << "\n";
+            if (!cfg.outFile.empty()) {
+                std::cout << "[+] " << (cfg.isEncrypt ? "Encryption" : "Decryption") << " successful.\n";
+                std::cout << "    Output saved to: " << cfg.outFile << "\n";
+            }
+            return 0;
         } 
         else {
             std::cerr << "Unknown command: " << command << "\n";
             PrintUsage(argv[0]);
             return 1;
         }
-        return 0;
     } catch (const std::exception& e) {
-        std::cerr << "[!] Error: " << e.what() << "\n";
+        std::cerr << "[!] CRITICAL ERROR: " << e.what() << "\n";
         return 1;
     }
 }
-
 #endif
+

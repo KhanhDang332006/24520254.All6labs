@@ -1,5 +1,0 @@
-Hello
-GCM
-and
-CCM
-Mode

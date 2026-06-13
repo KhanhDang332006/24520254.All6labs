@@ -1,0 +1,91 @@
+
+[
+  {
+    "test_name": "TC01: AES-128-CBC (NIST SP 800-38A F.2.1)",
+    "mode": "cbc",
+    "key": "2b7e151628aed2a6abf7158809cf4f3c",
+    "iv": "000102030405060708090a0b0c0d0e0f",
+    "plaintext": "6bc1bee22e409f96e93d7e117393172a",
+    "ciphertext": "7649abac8119b246cee98e9b12e9197d"
+  },
+  {
+    "test_name": "TC02: AES-256-CBC (NIST SP 800-38A F.2.5)",
+    "mode": "cbc",
+    "key": "603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4",
+    "iv": "000102030405060708090a0b0c0d0e0f",
+    "plaintext": "6bc1bee22e409f96e93d7e117393172a",
+    "ciphertext": "f58c4c04d6e5f1ba779eabfb5f7bfbd6"
+  },
+  {
+    "test_name": "TC03: AES-128-CFB (NIST SP 800-38A F.3.13)",
+    "mode": "cfb",
+    "key": "2b7e151628aed2a6abf7158809cf4f3c",
+    "iv": "000102030405060708090a0b0c0d0e0f",
+    "plaintext": "6bc1bee22e409f96e93d7e117393172a",
+    "ciphertext": "3b3fd92eb72dad20333449f8e83cfb4a"
+  },
+  {
+    "test_name": "TC04: AES-128-OFB (NIST SP 800-38A F.4.1)",
+    "mode": "ofb",
+    "key": "2b7e151628aed2a6abf7158809cf4f3c",
+    "iv": "000102030405060708090a0b0c0d0e0f",
+    "plaintext": "6bc1bee22e409f96e93d7e117393172a",
+    "ciphertext": "3b3fd92eb72dad20333449f8e83cfb4a"
+  },
+  {
+    "test_name": "TC05: AES-128-CTR (NIST SP 800-38A F.5.1)",
+    "mode": "ctr",
+    "key": "2b7e151628aed2a6abf7158809cf4f3c",
+    "iv": "f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+    "plaintext": "6bc1bee22e409f96e93d7e117393172a",
+    "ciphertext": "874d6191b620e3261bef6864990db6ce"
+  },
+  {
+    "test_name": "TC06: AES-256-CTR (NIST SP 800-38A F.5.5)",
+    "mode": "ctr",
+    "key": "603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4",
+    "iv": "f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+    "plaintext": "6bc1bee22e409f96e93d7e117393172a",
+    "ciphertext": "601ec313775789a5b7a7f504bbf3d228"
+  },
+  {
+    "test_name": "TC07: AES-128-GCM (NIST CAVP / AEAD)",
+    "mode": "gcm",
+    "key": "00000000000000000000000000000000",
+    "iv": "000000000000000000000000",
+    "aad": "00000000000000000000000000000000",
+    "plaintext": "00000000000000000000000000000000",
+    "ciphertext": "0388dace60b6a392f328c2b971b2fe78",  
+    "tag": "ab6e47d42cec13bdf53a67b21257bddf"
+  },
+  {
+    "test_name": "TC08: AES-256-GCM (NIST CAVP / AEAD)",
+    "mode": "gcm",
+    "key": "0000000000000000000000000000000000000000000000000000000000000000",
+    "iv": "000000000000000000000000",
+    "aad": "",
+    "plaintext": "00000000000000000000000000000000",
+    "ciphertext": "cea7403d4d606b6e074ec5d3baf39d18",
+    "tag": "d0d1c8a799996bf0265b98b5d48ab919"
+  },
+  {
+    "test_name": "TC09: AES-128-CCM (RFC 3610 Packet 4 / NIST 800-38C)",
+    "mode": "ccm",
+    "key": "404142434445464748494a4b4c4d4e4f",
+    "iv": "101112131415161718191a1b1c",
+    "aad": "000102030405060708090a0b0c0d0e0f10111213",
+    "plaintext": "202122232425262728292a2b2c2d2e2f3031323334353637",
+    "ciphertext": "69915dad1e84c6376a68c2967e4dab615ae0fd1faec44cc4",
+    "tag": "848235d96fddf092"
+  },
+  {
+    "test_name": "TC10: AES-128-CCM (RFC 3610 Packet 5 / NIST 800-38C)",
+    "mode": "ccm",
+    "key": "404142434445464748494a4b4c4d4e4f",
+    "iv": "101112131415161718191a1b1c",
+    "aad": "000102030405060708090a0b0c0d0e0f1011121314151617",
+    "plaintext": "202122232425262728292a2b2c2d2e2f3031323334353637",
+    "ciphertext": "03ad7a28e9389e875151528654c86518a4a51e626e2e5414",
+    "tag": "a1c9da6000c0ba1f"
+  }
+]

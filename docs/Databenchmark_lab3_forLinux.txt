@@ -1,0 +1,25 @@
+==================================================
+   LAB 3 - RSA-OAEP & HYBRID BENCHMARK
+==================================================
+[*] Benchmarking RSA-3072 (N=30, Ops/Block=1000)
+  - Keygen     : Mean = 308.323 ms, Median = 275.047 ms, StdDev = 178.229 ms, 95% CI = [244.544, 372.101]
+  - Encrypt    : Mean = 0.088 ms, Median = 0.087 ms, StdDev = 0.002 ms, 95% CI = [0.087, 0.088]
+  - Decrypt    : Mean = 4.342 ms, Median = 4.340 ms, StdDev = 0.012 ms, 95% CI = [4.338, 4.347]
+--------------------------------------------------
+[*] Benchmarking RSA-4096 (N=30, Ops/Block=1000)
+  - Keygen     : Mean = 423.548 ms, Median = 325.599 ms, StdDev = 234.182 ms, 95% CI = [339.747, 507.349]
+  - Encrypt    : Mean = 0.091 ms, Median = 0.091 ms, StdDev = 0.000 ms, 95% CI = [0.091, 0.091]
+  - Decrypt    : Mean = 5.692 ms, Median = 5.691 ms, StdDev = 0.019 ms, 95% CI = [5.685, 5.699]
+--------------------------------------------------
+[*] Benchmarking Hybrid Encryption - 1 KB (N=30, Ops/Block=1000)
+  - Latency    : Mean = 0.091 ms, Median = 0.091 ms, StdDev = 0.000 ms, 95% CI = [0.091, 0.091]
+  - Throughput : 436.80 MB/s
+--------------------------------------------------
+[*] Benchmarking Hybrid Encryption - 1 MB (N=30, Ops/Block=100)
+  - Latency    : Mean = 1.228 ms, Median = 1.228 ms, StdDev = 0.012 ms, 95% CI = [1.224, 1.232]
+  - Throughput : 894.70 MB/s
+--------------------------------------------------
+[*] Benchmarking Hybrid Encryption - 100 MB (N=30, Ops/Block=1)
+  - Latency    : Mean = 91.909 ms, Median = 91.852 ms, StdDev = 1.271 ms, 95% CI = [91.454, 92.364]
+  - Throughput : 1089.78 MB/s
+--------------------------------------------------

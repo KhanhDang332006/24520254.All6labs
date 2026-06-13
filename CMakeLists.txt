@@ -1,38 +1,51 @@
 cmake_minimum_required(VERSION 3.15)
-project(Crypto_Labs_All CXX)
+project(CryptoLabs VERSION 1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
+set(CMAKE_CXX_STANDARD_REQUIRED True)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON) # Cần để build .so trên Linux
 
-# 1. Cấu hình tìm Crypto++ linh hoạt cho cả Windows (truyền -DCRYPTOPP_ROOT) và Linux
-find_path(CRYPTOPP_INCLUDE_DIR NAMES cryptopp/rsa.h
-    HINTS ${CRYPTOPP_ROOT}/include $ENV{CRYPTOPP_ROOT}/include /usr/include
-)
-find_library(CRYPTOPP_LIBRARY NAMES cryptopp cryptlib
-    HINTS ${CRYPTOPP_ROOT}/lib ${CRYPTOPP_ROOT}/lib64 ${CRYPTOPP_ROOT}/lib/cryptopp/gcc $ENV{CRYPTOPP_ROOT}/lib /usr/lib
-)
+# 1. TỰ ĐỘNG TÌM THƯ VIỆN TRONG HỆ THỐNG
+# (Sẽ tự tìm OpenSSL và Crypto++ bất kể người dùng cài ở ổ C: hay D: hay /usr/lib)
+find_package(OpenSSL REQUIRED)
+find_path(CRYPTOPP_INCLUDE_DIR NAMES cryptopp/cryptlib.h PATH_SUFFIXES include)
+find_library(CRYPTOPP_LIBRARY NAMES cryptopp cryptlib PATH_SUFFIXES lib lib64)
 
 if(NOT CRYPTOPP_INCLUDE_DIR OR NOT CRYPTOPP_LIBRARY)
-    message(WARNING "Khong tim thay Crypto++. Truyen -DCRYPTOPP_ROOT de chi dinh duong dan.")
+    message(FATAL_ERROR "Lỗi: Không tìm thấy Crypto++. Vui lòng cài đặt qua MSYS2 (pacman) trên Windows hoặc apt trên Ubuntu.")
 endif()
 
-# Gom cac module core de xai chung
-add_library(crypto_core INTERFACE)
-target_include_directories(crypto_core INTERFACE ${CRYPTOPP_INCLUDE_DIR})
-target_link_libraries(crypto_core INTERFACE ${CRYPTOPP_LIBRARY})
-
+# 2. PHÂN NHÁNH THƯ VIỆN THEO HỆ ĐIỀU HÀNH
 if(WIN32)
-    target_link_libraries(crypto_core INTERFACE ws2_32 crypt32)
-    target_compile_definitions(crypto_core INTERFACE _WIN32_WINNT=0x0602)
+    set(OS_LIBS ws2_32 crypt32)
 else()
-    target_link_libraries(crypto_core INTERFACE pthread)
+    find_package(Threads REQUIRED)
+    set(OS_LIBS Threads::Threads)
 endif()
 
-# 2. Add subdirectories cho cac Lab (comment nhung lab chua lam)
- add_subdirectory(src/lab1_sym_with_cryptopp)
-# add_subdirectory(src/lab2_aes)
-add_subdirectory(src/lab3_rsa_hybrid)
-# add_subdirectory(src/lab4_hash)
-# add_subdirectory(src/lab5_sig)
-# add_subdirectory(src/lab6_pqc)
+# ==============================================================
+# 3. TỰ ĐỘNG QUÉT TOÀN BỘ FILE VÀ BUILD (KHÔNG CẦN CẬP NHẬT TÊN FILE)
+# ==============================================================
+# Lệnh này sẽ tự động tìm tất cả các file .cpp nằm trong thư mục src/ và các thư mục con
+file(GLOB_RECURSE ALL_SRC_FILES "src/*.cpp")
+
+foreach(SRC_FILE IN LISTS ALL_SRC_FILES)
+    # Lấy tên file để làm tên tool (VD: rsatool.cpp -> rsatool)
+    get_filename_component(TOOL_NAME ${SRC_FILE} NAME_WE)
+    
+    # Sinh ra cờ macro viết hoa (VD: RSATOOL_BUILD_DLL)
+    string(TOUPPER "${TOOL_NAME}" TOOL_NAME_UPPER)
+    set(DLL_MACRO "${TOOL_NAME_UPPER}_BUILD_DLL")
+
+    # --- A. Tạo file thực thi (.exe / binary) ---
+    add_executable(${TOOL_NAME} ${SRC_FILE})
+    target_include_directories(${TOOL_NAME} PRIVATE ${CRYPTOPP_INCLUDE_DIR} ${OPENSSL_INCLUDE_DIR})
+    target_link_libraries(${TOOL_NAME} PRIVATE ${CRYPTOPP_LIBRARY} OpenSSL::Crypto ${OS_LIBS})
+
+    # --- B. Tạo file thư viện động (.dll / .so) ---
+    add_library(${TOOL_NAME}_shared SHARED ${SRC_FILE})
+    set_target_properties(${TOOL_NAME}_shared PROPERTIES OUTPUT_NAME ${TOOL_NAME})
+    target_compile_definitions(${TOOL_NAME}_shared PRIVATE ${DLL_MACRO})
+    target_include_directories(${TOOL_NAME}_shared PRIVATE ${CRYPTOPP_INCLUDE_DIR} ${OPENSSL_INCLUDE_DIR})
+    target_link_libraries(${TOOL_NAME}_shared PRIVATE ${CRYPTOPP_LIBRARY} OpenSSL::Crypto ${OS_LIBS})
+endforeach()

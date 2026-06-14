@@ -121,7 +121,7 @@ public:
         X509* cert = PEM_read_bio_X509(certBio, nullptr, nullptr, nullptr);
         BIO_free(certBio);
 
-        if (!cert) throw std::runtime_error("Fail Closed: File chứng chỉ không đúng định dạng X.509 chuẩn.");
+        if (!cert) throw std::runtime_error("Fail Closed: Certificate file is not in the correct X.509 format.");
 
         std::cout << "\n==================================================\n";
         std::cout << "          X.509 CERTIFICATE ANALYSIS\n";
@@ -165,7 +165,7 @@ public:
 
             if (!issuer_pubkey) {
                 X509_free(cert);
-                throw std::runtime_error("Fail Closed: Lỗi đọc public key của Issuer.");
+                throw std::runtime_error("Fail Closed: Issuer fails to read public key.");
             }
 
             if (X509_verify(cert, issuer_pubkey) == 1) {
@@ -250,15 +250,15 @@ public:
             if (arg == "--verbose") { flags.insert(arg); continue; }
             
             if (arg.rfind("--", 0) == 0) {
-                if (i + 1 >= argc || argv[i+1][0] == '-') throw std::invalid_argument("Fail Closed: Thiếu giá trị cho tham số " + arg);
-                if (args.count(arg)) throw std::invalid_argument("Fail Closed: Tham số " + arg + " bị lặp lại.");
+                if (i + 1 >= argc || argv[i+1][0] == '-') throw std::invalid_argument("Fail Closed: Missing value for parameter " + arg);
+                if (args.count(arg)) throw std::invalid_argument("Fail Closed: parameter " + arg + " repeated.");
                 args[arg] = argv[++i];
-            } else throw std::invalid_argument("Fail Closed: Tham số không hợp lệ " + arg);
+            } else throw std::invalid_argument("Fail Closed: Invalid parameter " + arg);
         }
 
         cfg.isVerbose = flags.count("--verbose");
 
-        if (!args.count("--in")) throw std::invalid_argument("Fail Closed: Bắt buộc phải có tham số --in.");
+        if (!args.count("--in")) throw std::invalid_argument("Fail Closed: The --in parameter is required.");
         cfg.certFile = args["--in"];
 
         if (args.count("--issuer-key")) {

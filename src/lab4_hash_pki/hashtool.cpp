@@ -267,7 +267,7 @@ namespace kat {
         size_t pos = 0;
         int passed = 0, failed = 0, total = 0;
 
-        // Đổi mốc (anchor) sang "algo" vì test case nào cũng phải có trường này
+        
         while ((pos = json.find("\"algo\"", pos)) != std::string::npos) {
             total++;
             size_t currentTcPos = pos;
@@ -405,25 +405,25 @@ public:
             if (arg == "--verbose" || arg == "--stream") { flags.insert(arg); continue; }
             
             if (arg.rfind("--", 0) == 0) {
-                if (i + 1 >= argc || argv[i+1][0] == '-') throw std::invalid_argument("Fail Closed: Thiếu giá trị cho tham số " + arg);
-                if (args.count(arg)) throw std::invalid_argument("Fail Closed: Tham số " + arg + " bị lặp lại.");
+                if (i + 1 >= argc || argv[i+1][0] == '-') throw std::invalid_argument("Fail Closed: Missing value for parameter " + arg);
+                if (args.count(arg)) throw std::invalid_argument("Fail Closed: parameter " + arg + " repeat");
                 args[arg] = argv[++i];
-            } else throw std::invalid_argument("Fail Closed: Tham số không hợp lệ " + arg);
+            } else throw std::invalid_argument("Fail Closed: Invalid parameter " + arg);
         }
 
         cfg.isVerbose = flags.count("--verbose");
         cfg.isStream = flags.count("--stream");
 
-        if (!args.count("--algo")) throw std::invalid_argument("Fail Closed: Bắt buộc phải có --algo.");
+        if (!args.count("--algo")) throw std::invalid_argument("Fail Closed: --algo is required");
         cfg.algo = util::ToLower(args["--algo"]);
 
         cfg.outlen = args.count("--outlen") ? std::stoull(args["--outlen"]) : 0;
         if ((cfg.algo == "shake128" || cfg.algo == "shake256") && cfg.outlen == 0) {
-            throw std::invalid_argument("Fail Closed: Các thuật toán SHAKE bắt buộc phải có --outlen.");
+            throw std::invalid_argument("Fail Closed: SHAKE algorithms require --outlen.");
         }
 
         bool hasIn = args.count("--in"), hasText = args.count("--text");
-        if (hasIn == hasText) throw std::invalid_argument("Fail Closed: Phải có đúng một đầu vào (--in HOẶC --text).");
+        if (hasIn == hasText) throw std::invalid_argument("Fail Closed: Only one input is required (--in OR --text).");
         
         cfg.inMode = hasText ? util::InputMode::TEXT : util::InputMode::FILE;
         cfg.inValue = hasText ? args["--text"] : args["--in"];
@@ -431,7 +431,7 @@ public:
 
         cfg.outFormat = cfg.outFile.empty() ? util::OutputFormat::HEX : util::OutputFormat::BINARY;
         if (args.count("--encode") && !util::ParseEncodeFormat(args["--encode"], cfg.outFormat)) {
-            throw std::invalid_argument("Fail Closed: --encode không hợp lệ (hex, base64, raw).");
+            throw std::invalid_argument("Fail Closed: --encode invalid (hex, base64, raw).");
         }
 
         return cfg;
@@ -474,10 +474,10 @@ int main(int argc, char* argv[]) {
         if (cfg.outFile.empty()) {
             if (cfg.outFormat == util::OutputFormat::HEX) std::cout << to_hex(digest) << "\n";
             else if (cfg.outFormat == util::OutputFormat::BASE64) std::cout << to_base64(digest) << "\n";
-            else throw std::runtime_error("Fail Closed: In raw binary ra màn hình rất nguy hiểm. Vui lòng dùng --encode hex hoặc base64.");
+            else throw std::runtime_error("Fail Closed: Printing raw binary to the screen is very dangerous. Please use --encode hex or base64");
         } else {
             std::ofstream out(cfg.outFile, std::ios::binary);
-            if (!out) throw std::runtime_error("Fail Closed: Không thể ghi file output: " + cfg.outFile);
+            if (!out) throw std::runtime_error("Fail Closed: Can't write file output: " + cfg.outFile);
 
             if (cfg.outFormat == util::OutputFormat::BINARY) {
                 out.write(reinterpret_cast<const char*>(digest.data()), digest.size());

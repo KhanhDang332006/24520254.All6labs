@@ -250,83 +250,115 @@ struct CryptoConfig {
 
 // --- 2. ĐỒNG NHẤT KAT RUNNER (State-Machine) ---
 namespace kat {
-    static std::vector<std::map<std::string, std::string>> ParseSimpleJsonArray(const std::string& filepath) {
-        std::vector<std::map<std::string, std::string>> array;
-        std::string content = util::ReadFileBinary(filepath);
-        std::map<std::string, std::string> currentObj;
-        bool inString = false;
-        std::string currentKey = "", currentVal = "", token = "";
-        bool expectingVal = false;
-        
-        for (size_t i = 0; i < content.size(); ++i) {
-            char c = content[i];
-            if (c == '"') {
-                inString = !inString;
-                if (!inString) { 
-                    if (!expectingVal) currentKey = token;
-                    else {
-                        currentVal = token;
-                        currentObj[util::ToUpper(currentKey)] = currentVal; 
-                        currentKey.clear(); currentVal.clear(); expectingVal = false;
-                    }
-                    token.clear();
-                }
-                continue;
-            }
-            if (inString) token += c;
-            else {
-                if (c == '{') currentObj.clear();
-                else if (c == '}') { if (!currentObj.empty()) array.push_back(currentObj); currentObj.clear(); }
-                else if (c == ':') expectingVal = true;
-            }
-        }
-        return array;
-    }
-
-    int Run(const std::string& filepath) {
-        std::vector<std::map<std::string, std::string>> kats;
-        try { kats = ParseSimpleJsonArray(filepath); } 
-        catch (const std::exception& e) {
-            std::cerr << "[!] Fail Closed (JSON Error): " << e.what() << "\n"; return 1;
+    int Run(const std::string& katFile) {
+        std::string json;
+        try {
+            json = util::ReadFileBinary(katFile);
+        } catch (const std::exception& e) {
+            std::cerr << "[!] Fail Closed (File Error): " << e.what() << "\n";
+            return 1;
         }
 
-        int passed = 0, failed = 0;
         std::cout << "=================================================\n";
         std::cout << "  RUNNING KNOWN ANSWER TESTS (HASHING)\n";
+        std::cout << "  Source: " << katFile << "\n";
         std::cout << "=================================================\n";
 
-        for (const auto& tc : kats) {
-            try {
-                if (!tc.count("ALGO") || !tc.count("MSG") || !tc.count("MD")) continue;
-                
-                std::string algo = util::ToLower(tc.at("ALGO"));
-                std::string msgHex = tc.at("MSG");
-                std::string expectedMdHex = util::ToLower(tc.at("MD"));
-                size_t outlen = tc.count("OUTLEN") ? std::stoull(tc.at("OUTLEN")) : 0;
+        size_t pos = 0;
+        int passed = 0, failed = 0, total = 0;
 
-                std::vector<uint8_t> msgBytes = util::HexDecodeBytes(msgHex);
+        // Đổi mốc (anchor) sang "algo" vì test case nào cũng phải có trường này
+        while ((pos = json.find("\"algo\"", pos)) != std::string::npos) {
+            total++;
+            size_t currentTcPos = pos;
+            pos += 6; 
+
+        
+            size_t nextTcPos = json.find("\"algo\"", pos);
+            size_t searchEnd = (nextTcPos != std::string::npos) ? nextTcPos : json.length();
+
+          
+            auto extractValue = [&](const std::string& key, size_t startPos) -> std::string {
+                std::string searchKey = "\"" + key + "\"";
+                size_t keyPos = json.find(searchKey, startPos);
                 
+              
+                if (keyPos == std::string::npos || keyPos > searchEnd) return "";
+
+                size_t colonPos = json.find(":", keyPos + searchKey.length());
+                if (colonPos == std::string::npos || colonPos > searchEnd) return "";
+
+                size_t start = colonPos + 1;
+                while (start < searchEnd && std::isspace(json[start])) start++;
+                if (start >= searchEnd) return "";
+
+                
+                if (json[start] == '"') {
+                    size_t end = json.find("\"", start + 1);
+                    if (end == std::string::npos || end > searchEnd) return "";
+                    return json.substr(start + 1, end - start - 1);
+                } 
+               
+                else {
+                    size_t end = start;
+                    while (end < searchEnd && (std::isdigit(json[end]) || json[end] == '-')) end++;
+                    return json.substr(start, end - start);
+                }
+            };
+
+            
+            std::string tcIdStr = std::to_string(total);
+            std::string parsedTcId = extractValue("tcId", currentTcPos);
+            if (!parsedTcId.empty()) {
+                tcIdStr = parsedTcId;
+            }
+
+            std::string algoStr = extractValue("algo", currentTcPos);
+            std::string msgHex = extractValue("msg", currentTcPos);
+            std::string expectedMdHex = util::ToLower(extractValue("md", currentTcPos));
+            std::string outlenStr = extractValue("outlen", currentTcPos);
+
+            if (algoStr.empty() || msgHex.empty() || expectedMdHex.empty()) {
+                continue; 
+            }
+
+            std::string algo = util::ToLower(algoStr);
+            size_t outlen = outlenStr.empty() ? 0 : std::stoull(outlenStr);
+            bool testPassed = false;
+            std::string actualMdHex = "";
+            std::string errorMsg = "";
+
+            try {
+                std::vector<uint8_t> msgBytes = util::HexDecodeBytes(msgHex);
                 Hasher hasher(algo);
                 auto digest = hasher.process(msgBytes.data(), msgBytes.size(), "", outlen);
-                std::string actualMdHex = util::ToLower(to_hex(digest));
+                actualMdHex = util::ToLower(to_hex(digest));
 
-                std::string id = tc.count("COUNT") ? tc.at("COUNT") : "Unknown";
                 if (actualMdHex == expectedMdHex) {
-                    std::cout << "[PASS] " << util::ToUpper(algo) << " - Test ID: " << id << "\n"; passed++;
+                    testPassed = true;
                 } else {
-                    std::cout << "[FAIL] " << util::ToUpper(algo) << " - Test ID: " << id << "\n";
-                    std::cout << "       Expected: " << expectedMdHex << "\n";
-                    std::cout << "       Actual  : " << actualMdHex << "\n";
-                    failed++;
+                    errorMsg = "Digest mismatch";
                 }
             } catch (const std::exception& e) {
-                std::cout << "[FAIL] Exception: " << e.what() << "\n";
+                errorMsg = std::string("Exception: ") + e.what();
+            }
+
+            if (testPassed) {
+                std::cout << "  [+] Test " << tcIdStr << " [" << util::ToUpper(algo) << "]: PASS\n";
+                passed++;
+            } else {
+                std::cout << "  [-] Test " << tcIdStr << " [" << util::ToUpper(algo) << "]: FAIL - " << errorMsg << "\n";
+                std::cout << "      Expected: " << expectedMdHex << "\n";
+                if (!actualMdHex.empty()) {
+                    std::cout << "      Actual  : " << actualMdHex << "\n";
+                }
                 failed++;
             }
         }
+
         std::cout << "-------------------------------------------------\n";
-        std::cout << "Summary: Total Tested: " << passed + failed << " | Passed: " << passed << " | Failed: " << failed << "\n";
-        if (failed == 0 && (passed + failed) > 0) std::cout << ">>> ALL KATs PASSED SUCCESSFULY. <<<\n";
+        std::cout << "Summary: Total Tested: " << total << " | Passed: " << passed << " | Failed: " << failed << "\n";
+        if (failed == 0 && total > 0) std::cout << ">>> ALL KATs PASSED SUCCESSFULLY. <<<\n";
         return failed > 0 ? 1 : 0;
     }
 }
